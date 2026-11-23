@@ -1,24 +1,11 @@
-# Exemplo sem dados do ambiente real. Copie para fornecer-servicos.yaml.
 versao: 1
-
 servidor_ssh:
   endereco: "SERVIDOR_OU_IP"
   porta: 22
   usuario: "USUARIO_SSH"
   chave_privada: "/caminho/para/chave"
   known_hosts: "~/.ssh/known_hosts"
-
-# Controla as unidades systemd que serão planejadas no Raspberry.
 iniciar_no_boot: false
-
-sockets:
-  - nome: "servico-exemplo"
-    habilitado: false
-    local: "/run/user/1000/servicos/exemplo.sock"
-    remoto: "/run/servico/exemplo.sock"
-
-pastas_compartilhadas:
-  - caminho: "/srv/dados/projeto"
-    permissao: "leitura_escrita"
-  - caminho: "/srv/dados/referencias"
-    permissao: "somente_leitura"
+convidados: []
+sockets: []
+pastas_compartilhadas: []

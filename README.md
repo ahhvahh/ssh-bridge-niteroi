@@ -1,45 +1,43 @@
 # SSH Bridge Niterói
 
-CLI em Rust para validar e planejar a configuração de compartilhamento de pastas e sockets Unix entre um servidor Debian e um Raspberry Pi.
+CLI Rust para administrar um cadastro de pastas e sockets Unix compartilhados entre máquinas Linux.
+
+## Instalação no Debian
+
+Instale Rust/Cargo conforme https://rustup.rs/ e as ferramentas git, build-essential, openssh-server, acl e util-linux pelo gerenciador de pacotes.
+
+```sh
+git clone -b develop https://github.com/ahhvahh/ssh-bridge-niteroi.git
+cd ssh-bridge-niteroi
+cargo build --release
+sudo ./install.sh
+sudoedit /etc/ssh-bridge-niteroi/fornecer-servicos.yaml
+```
+
+O instalador preserva o YAML existente e cria os grupos niteroi-ro, niteroi-rw e niteroi-sockets.
+
+## Cadastro
+
+```sh
+sudo ssh-bridge-niteroi guest add raspberry raspberry.local yugo
+sudo ssh-bridge-niteroi folder add /srv/projetos --permissao rw --grupo niteroi-rw
+sudo ssh-bridge-niteroi folder add /srv/referencias --permissao ro --grupo niteroi-ro
+sudo ssh-bridge-niteroi socket add exemplo /run/user/1000/exemplo.sock /run/exemplo.sock --grupo niteroi-sockets --habilitado
+sudo ssh-bridge-niteroi folder list
+sudo ssh-bridge-niteroi socket list
+sudo ssh-bridge-niteroi guest list
+sudo ssh-bridge-niteroi validate
+sudo ssh-bridge-niteroi access check
+sudo ssh-bridge-niteroi plan
+```
+
+Remova pelo nome do socket/convidado ou caminho da pasta, usando os subcomandos respectivos remove.
+O parâmetro global --config /caminho/arquivo.yaml permite usar outro arquivo. O comando init cria um novo YAML sem sobrescrever um existente.
+
+## Permissões
+
+Cadastre grupos específicos por recurso quando precisar de isolamento. O administrador deve configurar as permissões no servidor e o usuário SSH com privilégios mínimos; a montagem ro no cliente não substitui as permissões no servidor. O comando access check verifica grupo proprietário, associação ao grupo, tipo e acesso efetivo à entrada cadastrada. Não certifica o conteúdo recursivo.
 
 ## Estado atual
 
-A primeira entrega implementa:
-
-- leitura do YAML com tipos definidos;
-- validação de versão, campos SSH, caminhos absolutos e itens duplicados;
-- comando `validate` para verificar a configuração;
-- comando `plan` para visualizar o que seria configurado, sem alterar as máquinas.
-
-A aplicação **ainda não executa alterações remotas**. O endereço e usuário SSH do Raspberry, o ponto de montagem no convidado e a credencial usada pelo Raspberry para acessar o Debian precisam ser definidos antes de implementar `apply`.
-
-## Compilar
-
-Requisitos: Rust/Cargo e Debian ou outra distribuição Linux.
-
-```sh
-cargo build --release
-```
-
-O executável fica em `target/release/ssh-bridge-niteroi`.
-
-## Uso
-
-```sh
-ssh-bridge-niteroi validate config/fornecer-servicos.yaml
-ssh-bridge-niteroi plan config/fornecer-servicos.yaml
-```
-
-O exemplo em `config/fornecer-servicos.example.yaml` não contém endereços, usuários ou caminhos do ambiente real. Copie-o para `config/fornecer-servicos.yaml` e preencha os valores. Esse arquivo local já está no `.gitignore`.
-
-## Modelo previsto
-
-O controlador roda no Debian. O Raspberry montará as pastas do Debian via SSHFS/SFTP, com a permissão configurada por pasta, e abrirá os sockets locais por encaminhamento SSH. O início automático será instalado como unidades systemd no Raspberry quando a etapa de aplicação for implementada.
-
-As permissões efetivas também precisam estar corretas no servidor Debian. A opção de montagem somente leitura no Raspberry não substitui as permissões do usuário SSH no servidor.
-
-## Desenvolvimento
-
-- A CLI não usa shell para interpretar comandos recebidos do YAML.
-- A aplicação não altera permissões recursivamente.
-- Antes de habilitar `apply`, o plano precisa incluir conexão SSH do Raspberry, caminho de montagem e validações das permissões no Debian.
+A CLI persiste o cadastro e verifica o acesso no Debian. A configuração remota, montagem SSHFS, encaminhamento de sockets e instalação de unidades systemd ainda não são executadas pela CLI. Remover um cadastro não revoga permissões Linux nem desmonta recursos existentes. O comando status mostra o cadastro, não conexões ativas.

@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
     fs,
@@ -12,17 +12,31 @@ use std::{
 struct Cli {
     #[command(subcommand)]
     command: Command,
+    #[arg(long = "config", global = true, default_value = "/etc/ssh-bridge-niteroi/fornecer-servicos.yaml")]
+    settings: PathBuf,
 }
 
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Lê e valida o arquivo YAML sem alterar o sistema.
-    Validate { config: PathBuf },
+    Validate { path: Option<PathBuf> },
     /// Mostra as ações planejadas sem executar comandos SSH ou systemd.
-    Plan { config: PathBuf },
+    Plan { path: Option<PathBuf> },
+    /// Gerencia sockets cadastrados.
+    Socket { #[command(subcommand)] action: SocketAction },
+    /// Gerencia pastas cadastradas.
+    Folder { #[command(subcommand)] action: FolderAction },
+    /// Gerencia convidados cadastrados.
+    Guest { #[command(subcommand)] action: GuestAction },
+    /// Consulta grupos e permissões locais.
+    Access { #[command(subcommand)] action: AccessAction },
+    /// Inicializa um arquivo de configuração.
+    Init,
+    /// Exibe o cadastro atual.
+    Status,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
     versao: u8,
@@ -32,9 +46,11 @@ struct Config {
     sockets: Vec<SocketConfig>,
     #[serde(default)]
     pastas_compartilhadas: Vec<ShareConfig>,
+    #[serde(default)]
+    convidados: Vec<Guest>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct SshServer {
     endereco: String,
@@ -44,23 +60,27 @@ struct SshServer {
     known_hosts: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct SocketConfig {
     nome: String,
     habilitado: bool,
     local: String,
     remoto: String,
+    #[serde(default)]
+    grupo: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ShareConfig {
     caminho: String,
     permissao: Permission,
+    #[serde(default)]
+    grupo: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum Permission {
     LeituraEscrita,
@@ -89,7 +109,14 @@ fn main() -> ExitCode {
 fn run() -> Result<(), String> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Validate { config } => {
+        Command::Init => init(&cli.settings),
+        Command::Status => { let c = load_config(&cli.settings)?; print_plan(&c); Ok(()) },
+        Command::Socket { action } => edit_socket(&cli.settings, action),
+        Command::Folder { action } => edit_folder(&cli.settings, action),
+        Command::Guest { action } => edit_guest(&cli.settings, action),
+        Command::Access { action: AccessAction::Check } => check_access(&load_config(&cli.settings)?),
+        Command::Validate { path } => {
+            let config = path.unwrap_or(cli.settings);
             let parsed = load_config(&config)?;
             let errors = validate(&parsed);
             if errors.is_empty() {
@@ -105,7 +132,8 @@ fn run() -> Result<(), String> {
                 Err(errors.join("\n"))
             }
         }
-        Command::Plan { config } => {
+        Command::Plan { path } => {
+            let config = path.unwrap_or(cli.settings);
             let config = load_config(&config)?;
             let errors = validate(&config);
             if !errors.is_empty() {
@@ -225,4 +253,162 @@ fn print_plan(config: &Config) {
     println!(
         "Etapa pendente: conexão SSH com o Raspberry, pontos de montagem e aplicação systemd."
     );
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Guest {
+    nome: String,
+    endereco: String,
+    usuario: String,
+}
+
+#[derive(Debug, Subcommand)]
+enum SocketAction {
+    Add { nome: String, local: String, remoto: String, #[arg(long)] grupo: Option<String>, #[arg(long)] habilitado: bool },
+    Remove { nome: String },
+    List,
+}
+#[derive(Debug, Subcommand)]
+enum FolderAction {
+    Add { caminho: String, #[arg(long)] permissao: String, #[arg(long)] grupo: Option<String> },
+    Remove { caminho: String },
+    List,
+}
+#[derive(Debug, Subcommand)]
+enum GuestAction {
+    Add { nome: String, endereco: String, usuario: String },
+    Remove { nome: String },
+    List,
+}
+#[derive(Debug, Subcommand)]
+enum AccessAction { Check }
+
+fn init(path: &Path) -> Result<(), String> {
+    use std::io::Write;
+    let mut f = fs::OpenOptions::new().write(true).create_new(true).open(path)
+        .map_err(|e| e.to_string())?;
+    f.write_all(include_bytes!("../config/fornecer-servicos.example.yaml"))
+        .map_err(|e| e.to_string())
+}
+
+fn save(path: &Path, config: &Config) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let data = yaml_serde::to_string(config).map_err(|e| e.to_string())?;
+    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+    let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600)
+        .open(&tmp).map_err(|e| e.to_string())?;
+    let result = file.write_all(data.as_bytes()).and_then(|_| file.sync_all())
+        .and_then(|_| fs::rename(&tmp, path));
+    if result.is_err() { let _ = fs::remove_file(&tmp); }
+    result.map_err(|e| e.to_string())
+}
+
+fn checked_path(value: &str) -> Result<(), String> {
+    let mut errors = Vec::new();
+    validate_absolute_path("caminho", value, &mut errors);
+    if value == "/" || value.chars().any(char::is_control) {
+        errors.push("caminho inseguro".into());
+    }
+    if errors.is_empty() { Ok(()) } else { Err(errors.join("\n")) }
+}
+
+fn checked_group(grupo: &Option<String>) -> Result<(), String> {
+    if let Some(g) = grupo {
+        if g.is_empty() || !g.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+            return Err("grupo inválido".into());
+        }
+    }
+    Ok(())
+}
+
+fn edit_socket(path: &Path, action: SocketAction) -> Result<(), String> {
+    let mut c = load_config(path)?;
+    match action {
+        SocketAction::List => { for s in &c.sockets { println!("{}: {} -> {} [{}]", s.nome, s.local, s.remoto, s.grupo.as_deref().unwrap_or("sem grupo")); } return Ok(()); }
+        SocketAction::Add { nome, local, remoto, grupo, habilitado } => {
+            checked_path(&local)?; checked_path(&remoto)?; checked_group(&grupo)?;
+            if nome.trim().is_empty() || c.sockets.iter().any(|s| s.nome == nome || s.local == local) { return Err("nome ou socket local duplicado/inválido".into()); }
+            c.sockets.push(SocketConfig { nome, local, remoto, grupo, habilitado });
+        }
+        SocketAction::Remove { nome } => {
+            let n = c.sockets.len(); c.sockets.retain(|s| s.nome != nome);
+            if n == c.sockets.len() { return Err("socket não encontrado".into()); }
+        }
+    }
+    save(path, &c)
+}
+fn edit_folder(path: &Path, action: FolderAction) -> Result<(), String> {
+    let mut c = load_config(path)?;
+    match action {
+        FolderAction::List => { for p in &c.pastas_compartilhadas { println!("{}: {} [{}]", p.caminho, p.permissao.label(), p.grupo.as_deref().unwrap_or("sem grupo")); } return Ok(()); }
+        FolderAction::Add { caminho, permissao, grupo } => {
+            checked_path(&caminho)?; checked_group(&grupo)?;
+            if c.pastas_compartilhadas.iter().any(|p| p.caminho == caminho) { return Err("pasta duplicada".into()); }
+            let permissao = match permissao.as_str() { "ro" => Permission::SomenteLeitura, "rw" => Permission::LeituraEscrita, _ => return Err("permissão precisa ser ro ou rw".into()) };
+            c.pastas_compartilhadas.push(ShareConfig { caminho, permissao, grupo });
+        }
+        FolderAction::Remove { caminho } => {
+            let n = c.pastas_compartilhadas.len(); c.pastas_compartilhadas.retain(|p| p.caminho != caminho);
+            if n == c.pastas_compartilhadas.len() { return Err("pasta não encontrada".into()); }
+        }
+    }
+    save(path, &c)
+}
+fn edit_guest(path: &Path, action: GuestAction) -> Result<(), String> {
+    let mut c = load_config(path)?;
+    match action {
+        GuestAction::List => { for g in &c.convidados { println!("{}: {}@{}", g.nome, g.usuario, g.endereco); } return Ok(()); }
+        GuestAction::Add { nome, endereco, usuario } => {
+            if [&nome, &endereco, &usuario].iter().any(|s| s.trim().is_empty() || s.chars().any(char::is_control)) || c.convidados.iter().any(|g| g.nome == nome) { return Err("convidado inválido ou duplicado".into()); }
+            c.convidados.push(Guest { nome, endereco, usuario });
+        }
+        GuestAction::Remove { nome } => {
+            let n = c.convidados.len(); c.convidados.retain(|g| g.nome != nome);
+            if n == c.convidados.len() { return Err("convidado não encontrado".into()); }
+        }
+    }
+    save(path, &c)
+}
+
+fn check_access(c: &Config) -> Result<(), String> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    use std::process::Command as Process;
+    let mut pending = false;
+    let uid = Process::new("id").arg("-u").output().map_err(|e| e.to_string())?;
+    if String::from_utf8_lossy(&uid.stdout).trim() != "0" { return Err("execute access check com sudo".into()); }
+    let memberships = Process::new("id").args(["-Gn", "--", &c.servidor_ssh.usuario])
+        .output().map_err(|e| e.to_string())?;
+    if !memberships.status.success() { return Err("usuário SSH local não encontrado".into()); }
+    let memberships = String::from_utf8_lossy(&memberships.stdout);
+    for (path, group, socket) in c.pastas_compartilhadas.iter()
+        .map(|p| (p.caminho.as_str(), p.grupo.as_deref(), false))
+        .chain(c.sockets.iter().filter(|s| s.habilitado).map(|s| (s.remoto.as_str(), s.grupo.as_deref(), true))) {
+        let Some(group) = group else { println!("PENDENTE {path}: grupo não cadastrado"); pending = true; continue; };
+        let member = memberships.split_whitespace().any(|g| g == group);
+        match fs::symlink_metadata(path) {
+            Ok(m) if if socket { m.file_type().is_socket() } else { m.is_dir() } => {
+                println!("{path}: grupo esperado={group}, gid={}, modo={:o}, usuário pertence ao grupo={member}", m.gid(), m.mode() & 0o7777);
+                let group_entry = Process::new("getent").args(["group", group]).output().map_err(|e| e.to_string())?;
+                let group_text = String::from_utf8_lossy(&group_entry.stdout);
+                let gid = group_text.split(':').nth(2).and_then(|s| s.parse::<u32>().ok());
+                if !member || !group_entry.status.success() || gid != Some(m.gid()) { pending = true; }
+                let effective = |flag: &str| -> Result<bool, String> {
+                    Process::new("runuser").args(["-u", &c.servidor_ssh.usuario, "--", "/usr/bin/test", flag, path])
+                        .status().map(|s| s.success()).map_err(|e| e.to_string())
+                };
+                let writable = effective("-w")?;
+                let readable = effective("-r")?;
+                let ok = if socket { writable } else {
+                    let rw = c.pastas_compartilhadas.iter().find(|p| p.caminho == path).map(|p| matches!(&p.permissao, Permission::LeituraEscrita)).unwrap_or(false);
+                    readable && effective("-x")? && writable == rw
+                };
+                if !ok { pending = true; println!("PENDENTE: permissões efetivas incompatíveis na entrada"); }
+            }
+            _ => { println!("PENDENTE {path}: recurso ausente ou tipo incorreto"); pending = true; }
+        }
+    }
+    println!("Diagnóstico da entrada cadastrada; conteúdo recursivo e funcionamento do serviço precisam de avaliação separada.");
+    if pending { Err("há pendências de acesso".into()) } else { Ok(()) }
 }
