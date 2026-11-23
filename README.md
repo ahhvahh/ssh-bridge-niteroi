@@ -32,7 +32,7 @@ systemctl list-timers niteroi-check.timer
 sudo journalctl -u niteroi-check.service -n 50 --no-pager
 ```
 
-O serviço verifica recursos locais. Túneis e montagens no Raspberry ainda precisam ser implementados.
+O serviço verifica recursos locais. O catálogo é disponibilizado por um socket Unix gerenciado pelo systemd após o comando server setup. A propriedade iniciar_no_boot controla o timer de diagnóstico, não a ativação do catálogo.
 
 ## Cadastro
 
@@ -58,8 +58,12 @@ Cadastre grupos específicos por recurso quando precisar de isolamento. O admini
 
 ## Estado atual
 
-A CLI persiste o cadastro e verifica o acesso no Debian. A configuração remota, montagem SSHFS, encaminhamento de sockets e instalação de unidades systemd no convidado ainda não são executadas pela CLI. Remover um cadastro não revoga permissões Linux nem desmonta recursos existentes. O comando status mostra o cadastro, não conexões ativas.
+A CLI administra o cadastro no Debian e oferece um cliente para consultar o catálogo e montar pastas ou abrir sockets sob demanda. A autenticação usa uma conta SSH dedicada sem shell interativo. Remover um cadastro não revoga permissões Linux nem desmonta recursos existentes. A montagem e os túneis são iniciados no cliente quando solicitados, não automaticamente no boot. O comando status mostra o cadastro, não conexões ativas.
 
 ## Guia de configuração
 
 Veja [Configuração do Debian e do convidado](docs/setup.md).
+
+## Cliente e servidor
+
+O guia [Configuração do Debian e do convidado](docs/setup.md) explica a instalação e o cadastro da chave SSH. No cliente, use `client init`, `client list`, `client mount`, `client mount-all`, `client unmount` e `client socket`. Em outro Linux, compile usando `./install.sh --client`. O cliente roda sem sudo após a instalação.

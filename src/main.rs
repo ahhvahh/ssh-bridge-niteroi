@@ -1,3 +1,4 @@
+mod bridge;
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -36,6 +37,10 @@ enum Command {
     Status,
     /// Sincroniza o timer local com iniciar_no_boot.
     BootSync,
+    /// Configura e publica o catálogo do servidor.
+    Server { #[command(subcommand)] action: bridge::ServerAction },
+    /// Configura o cliente e acessa os recursos autorizados.
+    Client { #[command(subcommand)] action: bridge::ClientAction },
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -111,6 +116,8 @@ fn main() -> ExitCode {
 fn run() -> Result<(), String> {
     let cli = Cli::parse();
     match cli.command {
+        Command::Server { action } => bridge::server(&cli.settings, action),
+        Command::Client { action } => bridge::client(action),
         Command::BootSync => {
             if cli.settings != Path::new("/etc/ssh-bridge-niteroi/fornecer-servicos.yaml") {
                 return Err("boot-sync usa exclusivamente a configuração instalada".into());
@@ -266,7 +273,7 @@ fn print_plan(config: &Config) {
     }
 
     println!(
-        "Etapa pendente: conexão SSH com o Raspberry, pontos de montagem e aplicação systemd."
+        "Use server setup no servidor e client init/list/mount/socket no convidado."
     );
 }
 
