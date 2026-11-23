@@ -90,15 +90,15 @@ fn run() -> Result<(), String> {
     let cli = Cli::parse();
     match cli.command {
         Command::Validate { config } => {
-            let config = load_config(&config)?;
-            let errors = validate(&config);
+            let parsed = load_config(&config)?;
+            let errors = validate(&parsed);
             if errors.is_empty() {
-                println!("YAML válido: {}", config_path_display(&config));
+                println!("YAML válido: {}", config.display());
                 println!(
                     "{} pasta(s), {} socket(s); iniciar no boot: {}",
-                    config.pastas_compartilhadas.len(),
-                    config.sockets.len(),
-                    config.iniciar_no_boot
+                    parsed.pastas_compartilhadas.len(),
+                    parsed.sockets.len(),
+                    parsed.iniciar_no_boot
                 );
                 Ok(())
             } else {
@@ -115,10 +115,6 @@ fn run() -> Result<(), String> {
             Ok(())
         }
     }
-}
-
-fn config_path_display(_config: &Config) -> &'static str {
-    "arquivo informado"
 }
 
 fn load_config(path: &Path) -> Result<Config, String> {
