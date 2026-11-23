@@ -1,0 +1,11 @@
+[Unit]
+Description=SSH Bridge Niteroi - verificacao periodica
+
+[Timer]
+OnActiveSec=30s
+OnCalendar=minutely
+AccuracySec=1s
+Unit=niteroi-check.service
+
+[Install]
+WantedBy=timers.target

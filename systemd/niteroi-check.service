@@ -1,0 +1,9 @@
+[Unit]
+Description=SSH Bridge Niteroi - verificar recursos locais
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/bin/ssh-bridge-niteroi access check
+TimeoutStartSec=55s

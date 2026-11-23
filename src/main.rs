@@ -34,6 +34,8 @@ enum Command {
     Init,
     /// Exibe o cadastro atual.
     Status,
+    /// Sincroniza o timer local com iniciar_no_boot.
+    BootSync,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -109,6 +111,19 @@ fn main() -> ExitCode {
 fn run() -> Result<(), String> {
     let cli = Cli::parse();
     match cli.command {
+        Command::BootSync => {
+            if cli.settings != Path::new("/etc/ssh-bridge-niteroi/fornecer-servicos.yaml") {
+                return Err("boot-sync usa exclusivamente a configuração instalada".into());
+            }
+            let c = load_config(&cli.settings)?;
+            let action = if c.iniciar_no_boot { "enable" } else { "disable" };
+            let result = std::process::Command::new("/usr/bin/systemctl")
+                .args([action, "--now", "niteroi-check.timer"])
+                .status().map_err(|e| e.to_string())?;
+            if !result.success() { return Err("falha ao sincronizar timer".into()); }
+            println!("Timer no boot: {}", c.iniciar_no_boot);
+            Ok(())
+        },
         Command::Init => init(&cli.settings),
         Command::Status => { let c = load_config(&cli.settings)?; print_plan(&c); Ok(()) },
         Command::Socket { action } => edit_socket(&cli.settings, action),

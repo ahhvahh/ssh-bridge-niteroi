@@ -14,7 +14,24 @@ sudo ./install.sh
 sudoedit /etc/ssh-bridge-niteroi/fornecer-servicos.yaml
 ```
 
-O instalador preserva o YAML existente e cria os grupos niteroi-ro, niteroi-rw e niteroi-sockets.
+O instalador preserva o YAML existente, cria os grupos niteroi-ro, niteroi-rw e niteroi-sockets e instala as unidades systemd.
+
+## Serviço local e inicialização
+
+O instalador registra niteroi-check.service e niteroi-check.timer.
+Com iniciar_no_boot: true, o timer é habilitado e iniciado. Com false, fica desabilitado e parado. As verificações periódicas ocorrem a cada minuto e uma execução pontual acontece após 30 segundos da ativação. Cada execução lê o YAML atual; falhas aparecem no journal. A verificação não altera permissões.
+
+Após editar iniciar_no_boot no YAML:
+
+```sh
+sudo ssh-bridge-niteroi boot-sync
+sudo systemctl start niteroi-check.service
+systemctl status niteroi-check.timer
+systemctl list-timers niteroi-check.timer
+sudo journalctl -u niteroi-check.service -n 50 --no-pager
+```
+
+O serviço verifica recursos locais. Túneis e montagens no Raspberry ainda precisam ser implementados.
 
 ## Cadastro
 
@@ -40,4 +57,4 @@ Cadastre grupos específicos por recurso quando precisar de isolamento. O admini
 
 ## Estado atual
 
-A CLI persiste o cadastro e verifica o acesso no Debian. A configuração remota, montagem SSHFS, encaminhamento de sockets e instalação de unidades systemd ainda não são executadas pela CLI. Remover um cadastro não revoga permissões Linux nem desmonta recursos existentes. O comando status mostra o cadastro, não conexões ativas.
+A CLI persiste o cadastro e verifica o acesso no Debian. A configuração remota, montagem SSHFS, encaminhamento de sockets e instalação de unidades systemd no convidado ainda não são executadas pela CLI. Remover um cadastro não revoga permissões Linux nem desmonta recursos existentes. O comando status mostra o cadastro, não conexões ativas.
