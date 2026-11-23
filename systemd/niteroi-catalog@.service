@@ -1,0 +1,11 @@
+[Unit]
+Description=SSH Bridge Niteroi - consulta de catalogo
+
+[Service]
+Type=exec
+User=root
+ExecStart=/usr/local/bin/ssh-bridge-niteroi server catalog
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+RuntimeMaxSec=20s

@@ -1,0 +1,15 @@
+[package]
+name = "ssh-bridge-niteroi"
+version = "0.1.0"
+edition = "2021"
+description = "Configuração segura de compartilhamentos e sockets SSH entre Debian e Raspberry Pi"
+license = "MIT"
+
+[[bin]]
+name = "ssh-bridge-niteroi"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+yaml_serde = "0.10.7"
