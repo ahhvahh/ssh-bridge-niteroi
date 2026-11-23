@@ -1,10 +1,27 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")"
-if [ "$(id -u)" -ne 0 ]; then
-    echo "Execute sudo ./install.sh" >&2
-    exit 1
-fi
+case "${1-}" in
+    "")
+        if [ "$(id -u)" -eq 0 ]; then
+            echo "Execute ./install.sh como usuário normal; o script solicita sudo após compilar." >&2
+            exit 1
+        fi
+        if ! command -v cargo >/dev/null 2>&1; then
+            echo "Instale Rust/Cargo antes de continuar." >&2
+            exit 1
+        fi
+        cargo build --release
+        exec sudo -- ./install.sh --install-only
+        ;;
+    --install-only)
+        if [ "$(id -u)" -ne 0 ]; then
+            echo "A instalação requer sudo." >&2
+            exit 1
+        fi
+        ;;
+    *) echo "Uso: ./install.sh" >&2; exit 2 ;;
+esac
 test -x target/release/ssh-bridge-niteroi
 if [ ! -d /run/systemd/system ]; then
     echo "Esta instalação precisa de systemd em execução." >&2

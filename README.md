@@ -9,10 +9,11 @@ Instale Rust/Cargo conforme https://rustup.rs/ e as ferramentas git, build-essen
 ```sh
 git clone -b develop https://github.com/ahhvahh/ssh-bridge-niteroi.git
 cd ssh-bridge-niteroi
-cargo build --release
-sudo ./install.sh
+./install.sh
 sudoedit /etc/ssh-bridge-niteroi/fornecer-servicos.yaml
 ```
+
+Execute como usuário normal. O script compila em modo release e solicita sudo somente para a instalação. Para instalar um binário previamente compilado, use sudo ./install.sh --install-only.
 
 O instalador preserva o YAML existente, cria os grupos niteroi-ro, niteroi-rw e niteroi-sockets e instala as unidades systemd.
 
@@ -58,3 +59,7 @@ Cadastre grupos específicos por recurso quando precisar de isolamento. O admini
 ## Estado atual
 
 A CLI persiste o cadastro e verifica o acesso no Debian. A configuração remota, montagem SSHFS, encaminhamento de sockets e instalação de unidades systemd no convidado ainda não são executadas pela CLI. Remover um cadastro não revoga permissões Linux nem desmonta recursos existentes. O comando status mostra o cadastro, não conexões ativas.
+
+## Guia de configuração
+
+Veja [Configuração do Debian e do convidado](docs/setup.md).
