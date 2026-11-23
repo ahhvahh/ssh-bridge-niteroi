@@ -1,6 +1,55 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")"
+# Assistente interativo. Os modos anteriores continuam disponíveis para automação.
+cli=/usr/local/bin/ssh-bridge-niteroi
+prompt() {
+    printf '%s ' "$1" >&2
+    IFS= read -r answer || { echo 'Entrada encerrada. Execute o assistente novamente para continuar.' >&2; exit 1; }
+}
+case "${1-}" in
+    cliente|servidor)
+        [ "$#" -eq 1 ] || { echo 'Uso: ./install.sh cliente|servidor' >&2; exit 2; }
+        [ "$(id -u)" -ne 0 ] || { echo 'Inicie como usuário normal. O instalador solicitará sudo.' >&2; exit 1; }
+        command -v cargo >/dev/null || { echo 'Instale Rust/Cargo primeiro.' >&2; exit 1; }
+        if [ "$1" = cliente ]; then
+            for cmd in ssh ssh-keygen sftp sshfs fusermount3; do
+                command -v "$cmd" >/dev/null || { echo "Dependência ausente: $cmd (instale openssh-client e sshfs)." >&2; exit 1; }
+            done
+        fi
+        cargo build --release
+        prompt 'Hostname ou IP do servidor, como será acessado pelo cliente [scb01]:'
+        server=${answer:-scb01}
+        case "$server" in -*|*[!a-zA-Z0-9.-]*) echo 'Nome de servidor inválido.' >&2; exit 2;; esac
+        if [ "$1" = cliente ]; then
+            sudo -- ./install.sh --install-client-only
+            "$cli" client init --server "$server"
+            printf '\nChave PÚBLICA deste cliente para colar no servidor:\n'
+            cat "$HOME/.ssh/id_ed25519_niteroi.pub"
+            prompt 'Execute ./install.sh servidor no Debian. Após autorizar a chave e obter a impressão digital do servidor, pressione Enter.'
+            echo 'No primeiro acesso, confira a impressão digital Ed25519 exibida pelo SSH com a do console do servidor.'
+            printf 'quit\n' | sftp -F /dev/null -o HostKeyAlgorithms=ssh-ed25519 -o StrictHostKeyChecking=ask \
+                -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o IdentitiesOnly=yes \
+                -i "$HOME/.ssh/id_ed25519_niteroi" "niteroi@$server"
+            "$cli" client list
+            echo 'Para montar as pastas: ssh-bridge-niteroi client mount-all'
+        else
+            sudo -- ./install.sh --install-only
+            sudo systemctl enable --now ssh.service
+            printf '\nImpressão digital Ed25519 do servidor (confira no cliente):\n'
+            ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+            prompt 'Cole a linha pública ssh-ed25519 exibida no cliente e pressione Enter:'
+            umask 077
+            pub=$(mktemp)
+            trap 'rm -f -- "$pub"' EXIT
+            printf '%s\n' "$answer" > "$pub"
+            sudo "$cli" server setup --address "$server" --public-key "$pub"
+            systemctl is-active niteroi-catalog.socket
+            echo 'Catálogo pronto. Continue no cliente. Use folder add e socket add para cadastrar recursos.'
+        fi
+        exit 0
+        ;;
+esac
 case "${1-}" in
     ""|--client)
         if [ "$(id -u)" -eq 0 ]; then
@@ -23,7 +72,7 @@ case "${1-}" in
             exit 1
         fi
         ;;
-    *) echo "Uso: ./install.sh [--client]" >&2; exit 2 ;;
+    *) echo "Uso: ./install.sh cliente|servidor (ou --client para apenas instalar)" >&2; exit 2 ;;
 esac
 test -x target/release/ssh-bridge-niteroi
 if [ "${1-}" = --install-client-only ]; then

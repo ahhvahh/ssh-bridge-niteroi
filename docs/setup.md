@@ -1,5 +1,17 @@
 # Configuração do servidor e do cliente
 
+## Instalação assistida por papel
+
+Nos dois computadores, atualize a branch develop e execute o script como usuário normal. O assistente usa SSH na porta 22. Instale Rust/Cargo e build-essential nos dois, openssh-server e util-linux no servidor, e openssh-client e sshfs no cliente.
+
+1. No convidado, entre como o usuário que fará as montagens e execute `./install.sh cliente`. Informe o nome resolvível ou IP do servidor. O assistente compila, instala e mostra a chave pública dedicada. Ele aguarda Enter enquanto você configura o servidor.
+2. No Debian, execute `./install.sh servidor`, informe o mesmo endereço e cole a linha pública do cliente. Anote a impressão digital de host exibida. A instalação autoriza a identidade, configura o SSH e ativa o socket Unix `/run/niteroi-catalog.sock` agora e nos próximos boots.
+3. Cadastre pastas e sockets no Debian conforme a seção de recursos. Conceda à conta niteroi os grupos e permissões dos recursos escolhidos. Confira com `sudo ssh-bridge-niteroi access check`.
+4. Retorne ao cliente, pressione Enter e confira a impressão digital antes de aceitar o primeiro acesso. O assistente confirma a autenticação e lista os recursos disponíveis. Use `ssh-bridge-niteroi client list` para consultar novamente, `client mount-all` para montar e `client socket NOME` para abrir um túnel sob demanda.
+
+O catálogo informa os recursos e seus modos de acesso. Os dados passam por SFTP/SSHFS ou pelos túneis Unix. O cliente pode repetir o assistente com a mesma identidade e o mesmo destino.
+
+
 O servidor Linux anuncia, em um socket Unix local, os recursos cadastrados e autorizados para a conta dedicada niteroi. O cliente consulta esse catálogo via OpenSSH; cada consulta lê o YAML atual e examina grupo e acesso efetivo da conta. O catálogo não recebe comandos, não expõe credenciais e não concede permissões. O SSHFS usa SFTP para pastas; OpenSSH encaminha sockets Unix. Nenhuma porta TCP adicional ao SSH é necessária.
 
 ## 1. Instalar no servidor
