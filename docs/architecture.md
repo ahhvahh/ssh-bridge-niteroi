@@ -1,31 +1,28 @@
-# Arquitetura inicial
+# Arquitetura
 
-## Controlador
+## Servidor e cliente
 
-O binário será executado no Debian servidor. A CLI lê o YAML, valida os dados e apresenta um plano antes de qualquer alteração.
+O mesmo binário Rust funciona no Debian servidor e em uma máquina convidada Linux. O servidor mantém o YAML em /etc/ssh-bridge-niteroi/fornecer-servicos.yaml e usa systemd para verificação periódica e ativação do catálogo por socket Unix.
 
-## Papéis
+1. No cliente, a identidade Ed25519 é gerada para a conta de uso local.
+2. O administrador do servidor cadastra a chave pública usando server setup. A conta dedicada niteroi utiliza autenticação por chave, SFTP e encaminhamento local de sockets Unix, sem terminal interativo.
+3. client list conecta por SSH e consulta /run/niteroi-catalog.sock. O systemd inicia uma instância curta que lê o cadastro atualizado, verifica a conta e apresenta os recursos que passam nos controles locais.
+4. client mount e client mount-all montam somente pastas anunciadas via SSHFS, abaixo de ~/data. client socket abre o encaminhamento de um socket anunciado, abaixo de ~/.local/share/niteroi/sockets.
 
-- **Debian servidor:** mantém os sockets e diretórios de origem; as permissões Unix/ACL do usuário SFTP definem o acesso real.
-- **Raspberry Pi:** cliente SSH; cria sockets locais encaminhados e monta as pastas remotas.
-- **SSHFS:** transporte de arquivos pelo subsistema SFTP do OpenSSH.
-- **systemd no Raspberry:** responsável pelo início automático e reinício de túneis/montagens.
+## Limites
 
-## Limite da primeira entrega
+- O socket de catálogo não recebe comandos nem dados de configuração do cliente. A chave privada fica no cliente.
+- A autorização efetiva é exercida pelas permissões Unix/ACLs e pelo OpenSSH no servidor. O catálogo filtra o cadastro; não isola o sistema de arquivos SFTP e não substitui ACLs nem políticas do serviço de origem.
+- O cliente monta recursos sob demanda. A inicialização automática das montagens e túneis no cliente não é instalada nesta versão.
+- Remover uma entrada controla futuras consultas, não revoga permissões e sessões existentes.
+- Nesta versão há uma identidade de convidado cadastrada por servidor. Múltiplas identidades e políticas por convidado exigirão um modelo de autorização separado.
 
-A primeira entrega oferece somente `validate` e `plan`. Ela não conecta por SSH, não executa comandos remotos, não instala unidades systemd e não altera permissões.
+## Segurança operacional
 
-Antes de implementar `apply`, o contrato de configuração precisa acrescentar:
-
-1. endereço, usuário, chave e `known_hosts` do Raspberry para a conexão de administração;
-2. raiz de montagem no Raspberry (o plano anterior indica `~/data`);
-3. caminho da chave no Raspberry usada para conectar de volta ao Debian;
-4. política de acesso do lado servidor, para que pastas somente leitura também sejam protegidas no sistema de arquivos do Debian.
-
-## Segurança
-
+- A autenticação do host SSH é verificada contra known_hosts; não desative a conferência.
+- Os comandos client são executados como usuário sem privilégios.
+- A administração das contas, dos grupos e do cadastro exige privilégios locais no servidor.
 - Não armazenar conteúdo de chave privada no YAML.
 - Não aceitar comandos shell arbitrários em campos do YAML.
-- Validar todos os caminhos antes de gerar unidades.
-- Não executar `chmod -R` ou `chown -R`.
-- `plan` não deve produzir efeitos colaterais.
+- Não executar chmod -R ou chown -R indiscriminadamente.
+- plan não produz efeitos colaterais.

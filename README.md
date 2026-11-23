@@ -38,8 +38,8 @@ O serviço verifica recursos locais. O catálogo é disponibilizado por um socke
 
 ```sh
 sudo ssh-bridge-niteroi guest add raspberry raspberry.local yugo
-sudo ssh-bridge-niteroi folder add /srv/projetos --permissao rw --grupo niteroi-rw
-sudo ssh-bridge-niteroi folder add /srv/referencias --permissao ro --grupo niteroi-ro
+sudo ssh-bridge-niteroi folder add /data/project/projetos --permissao rw --grupo niteroi-rw
+sudo ssh-bridge-niteroi folder add /data/project/referencias --permissao ro --grupo niteroi-ro
 sudo ssh-bridge-niteroi socket add exemplo /run/user/1000/exemplo.sock /run/exemplo.sock --grupo niteroi-sockets --habilitado
 sudo ssh-bridge-niteroi folder list
 sudo ssh-bridge-niteroi socket list
