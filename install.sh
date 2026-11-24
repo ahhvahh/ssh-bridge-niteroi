@@ -32,6 +32,8 @@ case "${1-}" in
                 -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o IdentitiesOnly=yes \
                 -i "$HOME/.ssh/id_ed25519_niteroi" "niteroi@$server"
             "$cli" client list
+            systemctl --user daemon-reload
+            systemctl --user enable --now niteroi-sync.timer
             echo 'Associe os IDs com client bind ID /caminho/local e execute client mount-all.'
         else
             sudo -- ./install.sh --install-only
@@ -77,7 +79,7 @@ esac
 test -x target/release/ssh-bridge-niteroi
 if [ "${1-}" = --install-client-only ]; then
     install -d -m 0755 /etc/systemd/user
-    install -m 0644 systemd/niteroi-folder@.service systemd/niteroi-socket@.service /etc/systemd/user/
+    install -m 0644 systemd/niteroi-folder@.service systemd/niteroi-socket@.service systemd/niteroi-sync.service systemd/niteroi-sync.timer /etc/systemd/user/
     install -d -m 0755 /usr/local/bin
     install -m 0755 target/release/ssh-bridge-niteroi /usr/local/bin/ssh-bridge-niteroi
     echo 'Cliente instalado. Execute ssh-bridge-niteroi client init --server SERVIDOR.'
