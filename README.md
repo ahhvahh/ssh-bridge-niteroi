@@ -70,7 +70,7 @@ Cadastre grupos específicos por recurso quando precisar de isolamento. O admini
 
 ## Estado atual
 
-A CLI administra o cadastro no Debian e oferece um cliente para consultar o catálogo e montar pastas ou abrir sockets sob demanda. A autenticação usa uma conta SSH dedicada sem shell interativo. Remover um cadastro não revoga permissões Linux nem desmonta recursos existentes. A montagem e os túneis são iniciados no cliente quando solicitados, não automaticamente no boot. O comando status mostra o cadastro, não conexões ativas.
+A CLI administra o cadastro no Debian e oferece um cliente para consultar o catálogo e montar pastas ou abrir sockets sob demanda. A autenticação usa uma conta SSH dedicada sem shell interativo. Remover um cadastro não revoga permissões Linux nem desmonta recursos existentes. Para iniciar recursos no boot e recuperar túneis após uma queda, habilite as unidades de usuário descritas no [guia de reconexão](docs/setup.md#reconexão-e-boot-do-raspberry-pi). O comando status mostra o cadastro, não conexões ativas.
 
 ## Guia de configuração
 

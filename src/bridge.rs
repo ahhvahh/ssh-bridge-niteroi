@@ -29,11 +29,11 @@ pub(super) enum ClientAction {
     /// Discover the resources currently available on the server.
     List,
     /// Mount a registered directory using SSHFS.
-    Mount { caminho: String },
+    Mount { caminho: String, #[arg(long)] foreground: bool },
     /// Mount every folder currently listed in the authorized catalog.
     MountAll,
     /// Open a registered socket for the lifetime of this command.
-    Socket { nome: String },
+    Socket { nome: String, #[arg(long)] runtime: bool },
     /// Unmount a local directory previously mounted by the client.
     Unmount { caminho: String },
 }
@@ -215,7 +215,7 @@ impl Client {
         private_dir(&self.home, &Path::new("data").join(relative))
     }
 
-    fn mount(&self, folder: &Folder) -> Result<(), String> {
+    fn mount(&self, folder: &Folder, foreground: bool) -> Result<(), String> {
         let local = self.local_folder(&folder.path)?;
         if Command::new("/usr/bin/mountpoint").arg("-q").arg(&local).status().map_err(error)?.success() {
             return Err(format!("Já montado: {}. Desmonte antes de alterar a configuração.", local.display()));
@@ -224,16 +224,23 @@ impl Client {
         let identity = format!("IdentityFile={}", self.home.join(".ssh/id_ed25519_niteroi").display());
         let mode = if folder.read_only { "ro" } else { "rw" };
         let options = format!("{identity},IdentitiesOnly=yes,BatchMode=yes,StrictHostKeyChecking=yes,ConnectTimeout=10,reconnect,ServerAliveInterval=15,ServerAliveCountMax=3,{mode}");
-        successful(Command::new("/usr/bin/sshfs").arg(format!("{}:{}", self.host(), folder.path))
+        let mut sshfs = Command::new("/usr/bin/sshfs");
+        if foreground { sshfs.args(["-f", "-o", "auto_unmount"]); }
+        successful(sshfs.arg(format!("{}:{}", self.host(), folder.path))
             .arg(&local).arg("-F").arg("/dev/null").arg("-p").arg(self.cfg.port.to_string()).arg("-o").arg(options))?;
         println!("Montado: {} ({mode})", local.display());
         Ok(())
     }
 
-    fn socket(&self, socket: &Socket) -> Result<(), String> {
+    fn socket(&self, socket: &Socket, runtime: bool) -> Result<(), String> {
         if !safe_name(&socket.name) || !safe_path(&socket.path) { return Err("Socket inválido".into()); }
-        let dir = private_dir(&self.home, Path::new(".local/share/niteroi/sockets"))?;
-        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).map_err(error)?;
+        let dir = if runtime {
+            PathBuf::from(std::env::var_os("RUNTIME_DIRECTORY").ok_or("RUNTIME_DIRECTORY ausente")?)
+        } else {
+            let dir = private_dir(&self.home, Path::new(".local/share/niteroi/sockets"))?;
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).map_err(error)?;
+            dir
+        };
         let local = dir.join(format!("{}.sock", socket.name));
         if local.as_os_str().as_encoded_bytes().len() >= 108 {
             return Err("Caminho de socket muito longo".into());
@@ -269,12 +276,12 @@ pub(super) fn client(action: ClientAction) -> Result<(), String> {
         ClientAction::MountAll => {
             let mut errors = Vec::new();
             for f in &catalog.folders {
-                if let Err(e) = c.mount(f) { errors.push(format!("{}: {e}", f.path)); }
+                if let Err(e) = c.mount(f, false) { errors.push(format!("{}: {e}", f.path)); }
             }
             if errors.is_empty() { Ok(()) } else { Err(errors.join("\n")) }
         }
-        ClientAction::Mount { caminho } => c.mount(catalog.folders.iter().find(|f| f.path == caminho).ok_or("Pasta não disponível no catálogo")?),
-        ClientAction::Socket { nome } => c.socket(catalog.sockets.iter().find(|s| s.name == nome).ok_or("Socket não disponível no catálogo")?),
+        ClientAction::Mount { caminho, foreground } => c.mount(catalog.folders.iter().find(|f| f.path == caminho).ok_or("Pasta não disponível no catálogo")?, foreground),
+        ClientAction::Socket { nome, runtime } => c.socket(catalog.sockets.iter().find(|s| s.name == nome).ok_or("Socket não disponível no catálogo")?, runtime),
         _ => unreachable!(),
     }
 }

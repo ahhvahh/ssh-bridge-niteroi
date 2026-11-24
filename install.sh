@@ -76,6 +76,8 @@ case "${1-}" in
 esac
 test -x target/release/ssh-bridge-niteroi
 if [ "${1-}" = --install-client-only ]; then
+    install -d -m 0755 /etc/systemd/user
+    install -m 0644 systemd/niteroi-folder@.service systemd/niteroi-socket@.service /etc/systemd/user/
     install -d -m 0755 /usr/local/bin
     install -m 0755 target/release/ssh-bridge-niteroi /usr/local/bin/ssh-bridge-niteroi
     echo 'Cliente instalado. Execute ssh-bridge-niteroi client init --server SERVIDOR.'

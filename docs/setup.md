@@ -104,7 +104,7 @@ ssh-bridge-niteroi client mount-all
 ssh-bridge-niteroi client socket exemplo
 ```
 
-O ponto de montagem de /data/project/exemplo é ~/data/project/exemplo. Pastas somente leitura são montadas com a opção ro. Mount-all tenta montar todas as pastas anunciadas; pontos já montados são reportados e não substituídos. O socket local usa ~/.local/share/niteroi/sockets/<nome>.sock; a coluna local do cadastro antigo é informativa para este cliente. O comando socket fica em primeiro plano enquanto mantém a conexão; termine com Ctrl+C. Use em outro terminal ou em um serviço systemd do usuário, se necessário. A configuração do catálogo e a chave SSH persistem no boot do servidor, mas a montagem e o túnel no cliente são sob demanda nesta versão.
+O ponto de montagem de /data/project/exemplo é ~/data/project/exemplo. Pastas somente leitura são montadas com a opção ro. Mount-all tenta montar todas as pastas anunciadas; pontos já montados são reportados e não substituídos. O socket local usa ~/.local/share/niteroi/sockets/<nome>.sock; a coluna local do cadastro antigo é informativa para este cliente. O comando socket fica em primeiro plano enquanto mantém a conexão; termine com Ctrl+C. Para manter recursos ativos, habilite as unidades de usuário conforme a seção de reconexão abaixo.
 
 ```sh
 ssh-bridge-niteroi client unmount /data/project/exemplo
@@ -113,6 +113,20 @@ ssh-bridge-niteroi client unmount /data/project/exemplo
 Depois de remover recursos no servidor, novas consultas deixam de anunciá-los. A revogação efetiva exige remover permissões ou a chave SSH, e encerrar conexões já abertas quando necessário. Uma sessão SSH existente pode manter grupos de acesso antigos. A falha na montagem ou no túnel não modifica permissões do servidor.
 
 ## 6. Logs e diagnóstico
+
+### Reconexão e boot do Raspberry Pi
+
+Após instalar ou atualizar o cliente e verificar a impressão digital do servidor, execute como yugo. Substitua os exemplos pelos recursos de `client list` e desmonte primeiro uma montagem manual do mesmo caminho.
+
+```sh
+systemctl --user daemon-reload
+folder_unit=$(systemd-escape --path --template=niteroi-folder@.service /data/project/exemplo)
+systemctl --user enable --now "$folder_unit" niteroi-socket@blender.service
+systemctl --user status "$folder_unit" niteroi-socket@blender.service
+journalctl --user -u niteroi-socket@blender.service -f
+```
+
+Para iniciar mesmo antes do login, um administrador executa `loginctl enable-linger yugo` no Raspberry. Configure o consumidor do socket para usar `$XDG_RUNTIME_DIR/niteroi-blender/blender.sock` (expanda a variável se necessário). O túnel manual mantém seu caminho habitual. Cada unidade consulta o catálogo ao iniciar. Se a rede estiver indisponível ou o processo terminar, o systemd tenta novamente após dez segundos. O SSHFS também usa reconexão interna. Quando o túnel é restabelecido, o cliente MCP precisa abrir uma nova conexão. Para parar e desativar, use `systemctl --user disable --now "$folder_unit" niteroi-socket@blender.service`.
 
 ```sh
 sudo journalctl -u niteroi-check.service -n 50 --no-pager
