@@ -78,10 +78,10 @@ ensure_client_packages() {
     ensure_packages openssh-client sshfs fuse3 util-linux coreutils
 }
 ensure_server_packages() {
-    ensure_packages openssh-server openssh-client acl util-linux coreutils
+    ensure_packages openssh-server openssh-client acl util-linux coreutils nftables
 }
 server_material() {
-    for file in config/fornecer-servicos.example.yaml scripts/setup-server.sh         systemd/niteroi-check.service systemd/niteroi-check.timer         systemd/niteroi-catalog.socket systemd/niteroi-catalog@.service; do
+    for file in config/fornecer-servicos.example.yaml scripts/setup-server.sh         systemd/niteroi-check.service systemd/niteroi-check.timer         systemd/niteroi-catalog.socket systemd/niteroi-catalog@.service scripts/niteroi-guard.sh systemd/niteroi-guard.service; do
         [ -f "$file" ] || { echo "Arquivo do servidor ausente: $file. Use enviar-servidor a partir do projeto completo." >&2; exit 1; }
     done
 }
@@ -138,8 +138,8 @@ case "${1-}" in
         if [ "$role" = servidor ]; then
             install -d "$stage/config" "$stage/scripts"
             install -m 0644 config/fornecer-servicos.example.yaml "$stage/config/"
-            install -m 0755 scripts/setup-server.sh "$stage/scripts/"
-            install -m 0644 systemd/niteroi-check.service systemd/niteroi-check.timer systemd/niteroi-catalog.socket systemd/niteroi-catalog@.service "$stage/systemd/"
+            install -m 0755 scripts/setup-server.sh scripts/niteroi-guard.sh "$stage/scripts/"
+            install -m 0644 systemd/niteroi-check.service systemd/niteroi-check.timer systemd/niteroi-catalog.socket systemd/niteroi-catalog@.service systemd/niteroi-guard.service "$stage/systemd/"
         else
             install -m 0644 systemd/niteroi-folder@.service systemd/niteroi-socket@.service systemd/niteroi-sync.service systemd/niteroi-sync.timer "$stage/systemd/"
         fi
@@ -252,6 +252,8 @@ install -m 0644 systemd/niteroi-check.service /etc/systemd/system/niteroi-check.
 install -m 0644 systemd/niteroi-check.timer /etc/systemd/system/niteroi-check.timer
 install -d -m 0755 /usr/local/libexec/ssh-bridge-niteroi
 install -m 0755 scripts/setup-server.sh /usr/local/libexec/ssh-bridge-niteroi/setup-server
+install -m 0755 scripts/niteroi-guard.sh /usr/local/libexec/ssh-bridge-niteroi/niteroi-guard
+install -m 0644 systemd/niteroi-guard.service /etc/systemd/system/
 install -m 0644 systemd/niteroi-catalog.socket /etc/systemd/system/niteroi-catalog.socket
 install -m 0644 systemd/niteroi-catalog@.service /etc/systemd/system/niteroi-catalog@.service
 systemctl daemon-reload

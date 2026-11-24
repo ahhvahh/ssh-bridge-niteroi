@@ -215,6 +215,7 @@ impl Client {
             let mut bytes = Vec::new();
             stream.take(LIMIT + 1).read_to_end(&mut bytes).map_err(error)?;
             if bytes.len() as u64 > LIMIT { return Err("Catálogo grande demais".into()); }
+            if bytes.is_empty() { return Err("Catálogo vazio: verifique o encaminhamento Unix e o serviço do servidor".into()); }
             let catalog: Catalog = yaml_serde::from_slice(&bytes).map_err(error)?;
             if catalog.version != 1 && catalog.version != 2 { return Err("Versão do catálogo incompatível".into()); }
             Ok(catalog)
@@ -326,12 +327,12 @@ impl Client {
             return Self::checked_destination(&local);
         }
         if !safe_path(remote) { return Err("Caminho remoto inválido".into()); }
-        let relative = remote.strip_prefix("/data/").ok_or("O cliente aceita pastas abaixo de /data/")?;
+        let relative = remote.strip_prefix("/data/").unwrap_or_else(|| remote.trim_start_matches('/'));
         private_dir(&self.home, &Path::new("data").join(relative))
     }
 
     fn mount(&self, folder: &Folder, foreground: bool) -> Result<(), String> {
-        if !safe_path(&folder.path) || !folder.path.starts_with("/data/") {
+        if !safe_path(&folder.path) {
             return Err("Caminho remoto inválido".into());
         }
         let local = self.local_folder(folder.key())?;
@@ -469,7 +470,7 @@ pub(super) fn server(path: &Path, action: ServerAction) -> Result<(), String> {
             }
             let folders: Vec<Folder> = c.pastas_compartilhadas.iter().filter_map(|f| {
                 let ro = matches!(&f.permissao, Permission::SomenteLeitura);
-                if f.caminho.starts_with("/data/") && allowed(&f.caminho, &f.grupo, false, ro) { Some(Folder { id: f.id.clone(), path: f.caminho.clone(), read_only: ro }) } else { None }
+                if allowed(&f.caminho, &f.grupo, false, ro) { Some(Folder { id: f.id.clone(), path: f.caminho.clone(), read_only: ro }) } else { None }
             }).collect();
             let sockets = c.sockets.iter().filter(|s| s.habilitado && safe_name(&s.nome) && allowed(&s.remoto, &s.grupo, true, false))
                 .map(|s| Socket { name: s.nome.clone(), path: s.remoto.clone() }).collect();
