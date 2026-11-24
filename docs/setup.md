@@ -66,8 +66,8 @@ A chave aceita é única nesta primeira implementação. Não substitua nem reut
 ## 4. Cadastrar recursos
 
 ```sh
-sudo ssh-bridge-niteroi folder add /data/project/exemplo --permissao rw --grupo niteroi-rw
-sudo ssh-bridge-niteroi folder add /data/project/referencias --permissao ro --grupo niteroi-ro
+sudo ssh-bridge-niteroi folder add /data/project/exemplo --id projetos --permissao rw --grupo niteroi-rw
+sudo ssh-bridge-niteroi folder add /data/project/referencias --id referencias --permissao ro --grupo niteroi-ro
 sudo ssh-bridge-niteroi socket add exemplo /home/usuario/.local/share/niteroi/sockets/exemplo.sock /run/exemplo.sock --grupo niteroi-sockets --habilitado
 sudo ssh-bridge-niteroi guest add convidado cliente.local usuario
 ```
@@ -99,15 +99,18 @@ Compare a impressão digital exibida com aquela obtida diretamente no servidor a
 
 ```sh
 ssh-bridge-niteroi client list
-ssh-bridge-niteroi client mount /data/project/exemplo
+ssh-bridge-niteroi client bind projetos "$HOME/workspace/projetos"
+ssh-bridge-niteroi client mount projetos
 ssh-bridge-niteroi client mount-all
 ssh-bridge-niteroi client socket exemplo
 ```
 
-O ponto de montagem de /data/project/exemplo é ~/data/project/exemplo. Pastas somente leitura são montadas com a opção ro. Mount-all tenta montar todas as pastas anunciadas; pontos já montados são reportados e não substituídos. O socket local usa ~/.local/share/niteroi/sockets/<nome>.sock; a coluna local do cadastro antigo é informativa para este cliente. O comando socket fica em primeiro plano enquanto mantém a conexão; termine com Ctrl+C. Para manter recursos ativos, habilite as unidades de usuário conforme a seção de reconexão abaixo.
+O servidor anuncia o ID, o caminho remoto e o modo de acesso no catálogo. O ID é único e aceita letras ASCII, números, hífen e sublinhado (até 64 caracteres). O cliente escolhe um destino absoluto acessível ao seu usuário, inclusive fora de HOME. A pasta deve estar vazia para a montagem e seu caminho não pode conter links simbólicos. A associação persiste em ~/.config/ssh-bridge-niteroi/mounts/<id>. Para alterar o destino, desative a unidade correspondente, desmonte e edite esse arquivo YAML (um caminho absoluto). Mount-all monta os IDs associados e preserva o comportamento anterior para cadastros antigos sem ID. Pastas somente leitura são montadas com ro. O socket local manual usa ~/.local/share/niteroi/sockets/<nome>.sock.
+
+Atualize cliente e servidor antes de cadastrar IDs: o catálogo com IDs utiliza a versão 2. Para migrar uma pasta existente, acrescente o campo id ao cadastro YAML no servidor, associe o destino no cliente e substitua a unidade antiga baseada no caminho pela unidade baseada no ID.
 
 ```sh
-ssh-bridge-niteroi client unmount /data/project/exemplo
+ssh-bridge-niteroi client unmount projetos
 ```
 
 Depois de remover recursos no servidor, novas consultas deixam de anunciá-los. A revogação efetiva exige remover permissões ou a chave SSH, e encerrar conexões já abertas quando necessário. Uma sessão SSH existente pode manter grupos de acesso antigos. A falha na montagem ou no túnel não modifica permissões do servidor.
@@ -120,7 +123,7 @@ Após instalar ou atualizar o cliente e verificar a impressão digital do servid
 
 ```sh
 systemctl --user daemon-reload
-folder_unit=$(systemd-escape --path --template=niteroi-folder@.service /data/project/exemplo)
+folder_unit=niteroi-folder@projetos.service
 systemctl --user enable --now "$folder_unit" niteroi-socket@blender.service
 systemctl --user status "$folder_unit" niteroi-socket@blender.service
 journalctl --user -u niteroi-socket@blender.service -f

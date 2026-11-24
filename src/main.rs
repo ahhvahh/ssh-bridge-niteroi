@@ -81,6 +81,8 @@ struct SocketConfig {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ShareConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
     caminho: String,
     permissao: Permission,
     #[serde(default)]
@@ -217,7 +219,13 @@ fn validate(config: &Config) -> Vec<String> {
     }
 
     let mut share_paths = HashSet::new();
+    let mut share_ids = HashSet::new();
     for share in &config.pastas_compartilhadas {
+        if let Some(id) = &share.id {
+            if !bridge::safe_name(id) || !share_ids.insert(id.as_str()) {
+                errors.push(format!("ID de pasta inválido ou duplicado: {id}"));
+            }
+        }
         validate_absolute_path("pastas_compartilhadas.caminho", &share.caminho, &mut errors);
         if !share_paths.insert(share.caminho.as_str()) {
             errors.push(format!("pasta compartilhada duplicada: {}", share.caminho));
@@ -259,7 +267,7 @@ fn print_plan(config: &Config) {
 
     println!("Pastas:");
     for share in &config.pastas_compartilhadas {
-        println!("  {} — {}", share.caminho, share.permissao.label());
+        println!("  {} — {} — {}", share.id.as_deref().unwrap_or("sem ID"), share.caminho, share.permissao.label());
     }
 
     println!("Sockets habilitados:");
@@ -293,7 +301,7 @@ enum SocketAction {
 }
 #[derive(Debug, Subcommand)]
 enum FolderAction {
-    Add { caminho: String, #[arg(long)] permissao: String, #[arg(long)] grupo: Option<String> },
+    Add { caminho: String, #[arg(long)] id: String, #[arg(long)] permissao: String, #[arg(long)] grupo: Option<String> },
     Remove { caminho: String },
     List,
 }
@@ -364,12 +372,13 @@ fn edit_socket(path: &Path, action: SocketAction) -> Result<(), String> {
 fn edit_folder(path: &Path, action: FolderAction) -> Result<(), String> {
     let mut c = load_config(path)?;
     match action {
-        FolderAction::List => { for p in &c.pastas_compartilhadas { println!("{}: {} [{}]", p.caminho, p.permissao.label(), p.grupo.as_deref().unwrap_or("sem grupo")); } return Ok(()); }
-        FolderAction::Add { caminho, permissao, grupo } => {
+        FolderAction::List => { for p in &c.pastas_compartilhadas { println!("{}: {} {} [{}]", p.id.as_deref().unwrap_or("sem ID"), p.caminho, p.permissao.label(), p.grupo.as_deref().unwrap_or("sem grupo")); } return Ok(()); }
+        FolderAction::Add { caminho, id, permissao, grupo } => {
             checked_path(&caminho)?; checked_group(&grupo)?;
+            if !bridge::safe_name(&id) || c.pastas_compartilhadas.iter().any(|p| p.id.as_deref() == Some(id.as_str())) { return Err("ID de pasta inválido ou duplicado".into()); }
             if c.pastas_compartilhadas.iter().any(|p| p.caminho == caminho) { return Err("pasta duplicada".into()); }
             let permissao = match permissao.as_str() { "ro" => Permission::SomenteLeitura, "rw" => Permission::LeituraEscrita, _ => return Err("permissão precisa ser ro ou rw".into()) };
-            c.pastas_compartilhadas.push(ShareConfig { caminho, permissao, grupo });
+            c.pastas_compartilhadas.push(ShareConfig { id: Some(id), caminho, permissao, grupo });
         }
         FolderAction::Remove { caminho } => {
             let n = c.pastas_compartilhadas.len(); c.pastas_compartilhadas.retain(|p| p.caminho != caminho);

@@ -32,7 +32,7 @@ case "${1-}" in
                 -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o IdentitiesOnly=yes \
                 -i "$HOME/.ssh/id_ed25519_niteroi" "niteroi@$server"
             "$cli" client list
-            echo 'Para montar as pastas: ssh-bridge-niteroi client mount-all'
+            echo 'Associe os IDs com client bind ID /caminho/local e execute client mount-all.'
         else
             sudo -- ./install.sh --install-only
             sudo systemctl enable --now ssh.service

@@ -28,7 +28,9 @@ pub(super) enum ClientAction {
     Init { #[arg(long)] server: String, #[arg(long, default_value_t = 22)] port: u16 },
     /// Discover the resources currently available on the server.
     List,
-    /// Mount a registered directory using SSHFS.
+    /// Associate a catalog ID with a local absolute path.
+    Bind { id: String, local: PathBuf },
+    /// Mount a registered directory using SSHFS (ID or legacy path).
     Mount { caminho: String, #[arg(long)] foreground: bool },
     /// Mount every folder currently listed in the authorized catalog.
     MountAll,
@@ -55,7 +57,16 @@ struct Catalog {
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
-struct Folder { path: String, read_only: bool }
+struct Folder {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    path: String,
+    read_only: bool,
+}
+
+impl Folder {
+    fn key(&self) -> &str { self.id.as_deref().unwrap_or(&self.path) }
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
@@ -73,7 +84,7 @@ fn safe_host(host: &str) -> bool {
         && host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
 }
 
-fn safe_name(name: &str) -> bool {
+pub(super) fn safe_name(name: &str) -> bool {
     !name.is_empty() && name.len() <= 64 && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
@@ -201,7 +212,7 @@ impl Client {
             stream.take(LIMIT + 1).read_to_end(&mut bytes).map_err(error)?;
             if bytes.len() as u64 > LIMIT { return Err("Catálogo grande demais".into()); }
             let catalog: Catalog = yaml_serde::from_slice(&bytes).map_err(error)?;
-            if catalog.version != 1 { return Err("Versão do catálogo incompatível".into()); }
+            if catalog.version != 1 && catalog.version != 2 { return Err("Versão do catálogo incompatível".into()); }
             Ok(catalog)
         })();
         let _ = fs::remove_file(&p);
@@ -209,14 +220,46 @@ impl Client {
         result
     }
 
+    fn binding_path(&self, id: &str) -> Result<PathBuf, String> {
+        if !safe_name(id) { return Err("ID inválido".into()); }
+        Ok(private_dir(&self.home, Path::new(".config/ssh-bridge-niteroi/mounts"))?.join(id))
+    }
+
+    fn checked_destination(local: &Path) -> Result<PathBuf, String> {
+        let relative = local.strip_prefix("/").map_err(|_| "Destino precisa ser absoluto")?;
+        if relative.as_os_str().is_empty() || relative.components().any(|c| !matches!(c, Component::Normal(_))) {
+            return Err("Destino inválido".into());
+        }
+        private_dir(Path::new("/"), relative)
+    }
+
+    fn bind(&self, id: &str, local: &Path) -> Result<(), String> {
+        let local = Self::checked_destination(local)?;
+        let path = self.binding_path(id)?;
+        let value = yaml_serde::to_string(&local).map_err(error)?;
+        if path.exists() {
+            if fs::read_to_string(&path).map_err(error)? == value { return Ok(()); }
+            return Err("ID já configurado; desmonte e revise o arquivo de associação".into());
+        }
+        write_new(&path, value.as_bytes())
+    }
+
     fn local_folder(&self, remote: &str) -> Result<PathBuf, String> {
+        if safe_name(remote) {
+            let path = self.binding_path(remote)?;
+            let local: PathBuf = yaml_serde::from_str(&fs::read_to_string(&path).map_err(error)?).map_err(error)?;
+            return Self::checked_destination(&local);
+        }
         if !safe_path(remote) { return Err("Caminho remoto inválido".into()); }
         let relative = remote.strip_prefix("/data/").ok_or("O cliente aceita pastas abaixo de /data/")?;
         private_dir(&self.home, &Path::new("data").join(relative))
     }
 
     fn mount(&self, folder: &Folder, foreground: bool) -> Result<(), String> {
-        let local = self.local_folder(&folder.path)?;
+        if !safe_path(&folder.path) || !folder.path.starts_with("/data/") {
+            return Err("Caminho remoto inválido".into());
+        }
+        let local = self.local_folder(folder.key())?;
         if Command::new("/usr/bin/mountpoint").arg("-q").arg(&local).status().map_err(error)?.success() {
             return Err(format!("Já montado: {}. Desmonte antes de alterar a configuração.", local.display()));
         }
@@ -269,18 +312,27 @@ pub(super) fn client(action: ClientAction) -> Result<(), String> {
     let catalog = c.catalog()?;
     match action {
         ClientAction::List => {
-            for f in catalog.folders { println!("folder {} {}", if f.read_only { "ro" } else { "rw" }, f.path); }
+            for f in catalog.folders { println!("folder {} {} {}", if f.read_only { "ro" } else { "rw" }, f.key(), f.path); }
             for s in catalog.sockets { println!("socket {}", s.name); }
             Ok(())
         }
         ClientAction::MountAll => {
             let mut errors = Vec::new();
             for f in &catalog.folders {
+                if let Some(id) = &f.id {
+                    if !c.binding_path(id)?.exists() { continue; }
+                }
                 if let Err(e) = c.mount(f, false) { errors.push(format!("{}: {e}", f.path)); }
             }
             if errors.is_empty() { Ok(()) } else { Err(errors.join("\n")) }
         }
-        ClientAction::Mount { caminho, foreground } => c.mount(catalog.folders.iter().find(|f| f.path == caminho).ok_or("Pasta não disponível no catálogo")?, foreground),
+        ClientAction::Bind { id, local } => {
+            if !catalog.folders.iter().any(|f| f.id.as_deref() == Some(id.as_str())) {
+                return Err("ID não disponível no catálogo".into());
+            }
+            c.bind(&id, &local)
+        },
+        ClientAction::Mount { caminho, foreground } => c.mount(catalog.folders.iter().find(|f| f.key() == caminho).ok_or("Pasta não disponível no catálogo")?, foreground),
         ClientAction::Socket { nome, runtime } => c.socket(catalog.sockets.iter().find(|s| s.name == nome).ok_or("Socket não disponível no catálogo")?, runtime),
         _ => unreachable!(),
     }
@@ -329,13 +381,22 @@ pub(super) fn server(path: &Path, action: ServerAction) -> Result<(), String> {
                 if socket { writable == Some(true) }
                 else { test("-r") == Some(true) && test("-x") == Some(true) && writable == Some(!read_only) }
             };
-            let folders = c.pastas_compartilhadas.iter().filter_map(|f| {
+            let mut ids = std::collections::HashSet::new();
+            for f in &c.pastas_compartilhadas {
+                if let Some(id) = &f.id {
+                    if !safe_name(id) || !ids.insert(id.as_str()) {
+                        return Err(format!("ID de pasta inválido ou duplicado: {id}"));
+                    }
+                }
+            }
+            let folders: Vec<Folder> = c.pastas_compartilhadas.iter().filter_map(|f| {
                 let ro = matches!(&f.permissao, Permission::SomenteLeitura);
-                if f.caminho.starts_with("/data/") && allowed(&f.caminho, &f.grupo, false, ro) { Some(Folder { path: f.caminho.clone(), read_only: ro }) } else { None }
+                if f.caminho.starts_with("/data/") && allowed(&f.caminho, &f.grupo, false, ro) { Some(Folder { id: f.id.clone(), path: f.caminho.clone(), read_only: ro }) } else { None }
             }).collect();
             let sockets = c.sockets.iter().filter(|s| s.habilitado && safe_name(&s.nome) && allowed(&s.remoto, &s.grupo, true, false))
                 .map(|s| Socket { name: s.nome.clone(), path: s.remoto.clone() }).collect();
-            let data = yaml_serde::to_string(&Catalog { version: 1, folders, sockets }).map_err(error)?;
+            let version = if folders.iter().any(|f| f.id.is_some()) { 2 } else { 1 };
+            let data = yaml_serde::to_string(&Catalog { version, folders, sockets }).map_err(error)?;
             if data.len() as u64 > LIMIT { return Err("Catálogo grande demais".into()); }
             std::io::stdout().write_all(data.as_bytes()).map_err(error)
         }
