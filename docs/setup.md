@@ -1,5 +1,11 @@
 # Configuração do servidor e do cliente
 
+O instalador verifica os pacotes Debian necessários e solicita autorização antes
+de atualizar o índice APT ou instalar dependências. Quando é necessário compilar,
+verifica Rust/Cargo (mínimo 1.85); se estiverem ausentes, oferece a instalação
+da toolchain stable pelo rustup. Para um cliente recebido como binário pronto,
+não instala Rust/Cargo. Execute como usuário normal com acesso ao sudo.
+
 ## Instalação assistida por papel
 
 Nos dois computadores, atualize a branch develop e execute o script como usuário normal. O assistente usa SSH na porta 22. Instale Rust/Cargo e build-essential nos dois, openssh-server e util-linux no servidor, e openssh-client e sshfs no cliente.
