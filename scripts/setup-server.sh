@@ -14,14 +14,16 @@ drop=/etc/ssh/sshd_config.d/00-niteroi.conf
 auth=/etc/ssh/niteroi_authorized_keys
 marker=/etc/ssh-bridge-niteroi/managed-account
 new_drop=0
+replaced_drop=0
 new_auth=0
 committed=0
 cleanup() {
     if [ "$committed" -eq 0 ]; then
         if [ "$new_drop" -eq 1 ]; then rm -f -- "$drop"; fi
+        if [ "$replaced_drop" -eq 1 ]; then install -o root -g root -m 0644 "$work/previous.conf" "$drop"; fi
         if [ "$new_auth" -eq 1 ]; then rm -f -- "$auth"; fi
     fi
-    rm -f -- "$work/key.pub" "$work/authorized_keys" "$work/sshd.conf"
+    rm -f -- "$work/key.pub" "$work/authorized_keys" "$work/sshd.conf" "$work/previous.conf" "$work/normalized-old" "$work/normalized-new"
     rmdir -- "$work"
 }
 trap cleanup EXIT
@@ -37,7 +39,7 @@ Match User niteroi
     PasswordAuthentication no
     KbdInteractiveAuthentication no
     ForceCommand internal-sftp
-    AllowTcpForwarding no
+    AllowTcpForwarding local
     AllowStreamLocalForwarding local
     AllowAgentForwarding no
     X11Forwarding no
@@ -65,15 +67,52 @@ else
     install -o root -g root -m 0644 "$work/authorized_keys" "$auth"
     new_auth=1
 fi
+# Only migrate the original managed policy and the known diagnostic variant.
+normalize_policy() {
+    awk '{
+        if ($1 == "LogLevel" && $2 == "DEBUG1" && NF == 2) next;
+        if ($1 == "AllowTcpForwarding" && ($2 == "no" || $2 == "local") && NF == 2)
+            $2 = "local";
+        if (NF) { $1=$1; if (!seen[$0]++) print }
+    }' "$1"
+}
 if [ -e "$drop" ]; then
-    cmp -s "$work/sshd.conf" "$drop" || { echo 'Configuração SSH existente difere da esperada.' >&2; exit 1; }
+    normalize_policy "$drop" > "$work/normalized-old"
+    normalize_policy "$work/sshd.conf" > "$work/normalized-new"
+    cmp -s "$work/normalized-old" "$work/normalized-new" || {
+        echo 'Configuração SSH existente difere da política gerenciada. Revise-a antes de continuar.' >&2
+        exit 1
+    }
+fi
+
+# Start the account-specific guard before enabling OpenSSH local forwarding.
+systemctl daemon-reload
+systemctl reload-or-restart niteroi-guard.service
+systemctl is-active --quiet niteroi-guard.service
+/usr/sbin/nft list table inet niteroi_guard >/dev/null
+install -d -m 0755 /etc/systemd/system/ssh.service.d
+dependency=/etc/systemd/system/ssh.service.d/90-niteroi-guard.conf
+if [ ! -e "$dependency" ]; then
+    printf '%s\n' '[Unit]' 'Requires=niteroi-guard.service' 'After=niteroi-guard.service' '[Service]' 'ExecStartPre=/usr/local/libexec/ssh-bridge-niteroi/niteroi-guard' > "$dependency"
+else
+    printf '%s\n' '[Unit]' 'Requires=niteroi-guard.service' 'After=niteroi-guard.service' '[Service]' 'ExecStartPre=/usr/local/libexec/ssh-bridge-niteroi/niteroi-guard' | cmp -s - "$dependency" || {
+        echo 'Dependência systemd existente divergente.' >&2; exit 1;
+    }
+fi
+systemctl daemon-reload
+if [ -e "$drop" ]; then
+    if ! cmp -s "$work/sshd.conf" "$drop"; then
+        cp -p "$drop" "$work/previous.conf"
+        replaced_drop=1
+        install -o root -g root -m 0644 "$work/sshd.conf" "$drop"
+    fi
 else
     install -o root -g root -m 0644 "$work/sshd.conf" "$drop"
     new_drop=1
 fi
 sshd -t
 effective=$(sshd -T -C user=niteroi,host=localhost,addr=127.0.0.1)
-for expected in 'authenticationmethods publickey' 'passwordauthentication no' 'kbdinteractiveauthentication no' 'forcecommand internal-sftp' 'allowtcpforwarding no' 'allowstreamlocalforwarding local' 'authorizedkeysfile /etc/ssh/niteroi_authorized_keys' 'permittty no'; do
+for expected in 'authenticationmethods publickey' 'passwordauthentication no' 'kbdinteractiveauthentication no' 'forcecommand internal-sftp' 'allowtcpforwarding local' 'allowstreamlocalforwarding local' 'authorizedkeysfile /etc/ssh/niteroi_authorized_keys' 'permittty no'; do
     printf '%s\n' "$effective" | grep -Fxq "$expected" || { echo "Configuração efetiva incompatível: $expected" >&2; exit 1; }
 done
 usermod -aG niteroi-catalog niteroi
