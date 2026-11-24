@@ -1,0 +1,13 @@
+[Unit]
+Description=Túnel Unix Niterói %i
+StartLimitIntervalSec=0
+
+[Service]
+RuntimeDirectory=niteroi-%i
+RuntimeDirectoryMode=0700
+ExecStart=/usr/local/bin/ssh-bridge-niteroi client socket --runtime %i
+Restart=always
+RestartSec=10s
+
+[Install]
+WantedBy=default.target

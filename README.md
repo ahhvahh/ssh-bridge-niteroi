@@ -50,8 +50,8 @@ O serviço verifica recursos locais. O catálogo é disponibilizado por um socke
 
 ```sh
 sudo ssh-bridge-niteroi guest add raspberry raspberry.local yugo
-sudo ssh-bridge-niteroi folder add /data/project/projetos --permissao rw --grupo niteroi-rw
-sudo ssh-bridge-niteroi folder add /data/project/referencias --permissao ro --grupo niteroi-ro
+sudo ssh-bridge-niteroi folder add /data/project/projetos --id projetos --permissao rw --grupo niteroi-rw
+sudo ssh-bridge-niteroi folder add /data/project/referencias --id referencias --permissao ro --grupo niteroi-ro
 sudo ssh-bridge-niteroi socket add exemplo /run/user/1000/exemplo.sock /run/exemplo.sock --grupo niteroi-sockets --habilitado
 sudo ssh-bridge-niteroi folder list
 sudo ssh-bridge-niteroi socket list
@@ -70,7 +70,7 @@ Cadastre grupos específicos por recurso quando precisar de isolamento. O admini
 
 ## Estado atual
 
-A CLI administra o cadastro no Debian e oferece um cliente para consultar o catálogo e montar pastas ou abrir sockets sob demanda. A autenticação usa uma conta SSH dedicada sem shell interativo. Remover um cadastro não revoga permissões Linux nem desmonta recursos existentes. A montagem e os túneis são iniciados no cliente quando solicitados, não automaticamente no boot. O comando status mostra o cadastro, não conexões ativas.
+A CLI administra o cadastro no Debian e oferece um cliente para consultar o catálogo e montar pastas ou abrir sockets sob demanda. A autenticação usa uma conta SSH dedicada sem shell interativo. Remover um cadastro não revoga permissões Linux nem desmonta recursos existentes. Para iniciar recursos no boot e recuperar túneis após uma queda, habilite as unidades de usuário descritas no [guia de reconexão](docs/setup.md#reconexão-e-boot-do-raspberry-pi). O comando status mostra o cadastro, não conexões ativas.
 
 ## Guia de configuração
 
