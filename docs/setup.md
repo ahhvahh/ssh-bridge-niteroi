@@ -22,6 +22,29 @@ O servidor Linux anuncia, em um socket Unix local, os recursos cadastrados e aut
 
 ## 1. Instalar no servidor
 
+### Instalar a partir de um binário enviado
+
+No computador com o projeto completo:
+
+```sh
+./install.sh enviar-servidor 192.168.1.103 usr02_srv
+```
+
+O envio inclui o binário, install.sh, o YAML de exemplo, o script de
+configuração e as unidades systemd do servidor. O binário é compilado para
+a arquitetura de destino ou pode ser indicado como quarto argumento.
+No servidor, execute como usuário normal:
+
+```sh
+cd ~/ssh-bridge-niteroi
+./install.sh servidor
+```
+
+O instalador verifica os arquivos recebidos, instala as dependências após
+confirmação e reutiliza o binário. O servidor não precisa de Cargo.
+O YAML instalado anteriormente em /etc é preservado.
+
+
 Instale Rust/Cargo (https://rustup.rs/), git, build-essential, openssh-server, acl e util-linux. No servidor:
 
 ```sh
