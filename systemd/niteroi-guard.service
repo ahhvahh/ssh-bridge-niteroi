@@ -1,0 +1,13 @@
+[Unit]
+Description=Niteroi - proteger conexoes TCP da conta dedicada
+After=nftables.service
+Before=ssh.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/libexec/ssh-bridge-niteroi/niteroi-guard
+ExecReload=/usr/local/libexec/ssh-bridge-niteroi/niteroi-guard
+
+[Install]
+WantedBy=multi-user.target
