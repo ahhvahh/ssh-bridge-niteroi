@@ -7,11 +7,11 @@ binary=target/release/ssh-bridge-niteroi
 if [ ! -f Cargo.toml ] && [ -x ./ssh-bridge-niteroi ]; then
     binary=./ssh-bridge-niteroi
 fi
-client_build() {
+build_or_check() {
     if [ "$binary" = ./ssh-bridge-niteroi ]; then
         "$binary" --version
     else
-        command -v cargo >/dev/null || { echo 'Instale Rust/Cargo primeiro.' >&2; exit 1; }
+        ensure_rust
         cargo build --release
     fi
 }
@@ -19,19 +19,92 @@ prompt() {
     printf '%s ' "$1" >&2
     IFS= read -r answer || { echo 'Entrada encerrada. Execute o assistente novamente para continuar.' >&2; exit 1; }
 }
+confirm() {
+    prompt "$1 [s/N]"
+    case "$answer" in
+        s|S|sim|Sim|SIM|y|Y|yes|YES) return 0;;
+        *) echo 'Instalação interrompida pelo usuário.' >&2; exit 1;;
+    esac
+}
+ensure_packages() {
+    missing=''
+    for package in "$@"; do
+        if ! dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null | grep -qx installed; then
+            missing="$missing $package"
+        fi
+    done
+    if [ -n "$missing" ]; then
+        confirm "Atualizar o índice APT e instalar:$missing?"
+        command -v sudo >/dev/null || { echo 'É necessário um usuário com sudo.' >&2; exit 1; }
+        sudo apt-get update
+        # Os nomes são constantes escolhidas pelo instalador.
+        # shellcheck disable=SC2086
+        sudo apt-get install --no-remove -y $missing
+    fi
+}
+rust_version_ok() {
+    command -v cargo >/dev/null && cargo --version >/dev/null 2>&1 &&
+        command -v rustc >/dev/null &&
+        version=$(rustc --version 2>/dev/null | awk 'NR==1 {print $2}') &&
+        [ -n "$version" ] && dpkg --compare-versions "$version" ge 1.85
+}
+ensure_rust() {
+    ensure_packages build-essential ca-certificates
+    if [ -x "$HOME/.cargo/bin/cargo" ]; then
+        PATH="$HOME/.cargo/bin:$PATH"
+        export PATH
+    fi
+    if rust_version_ok; then return; fi
+    if command -v rustup >/dev/null; then
+        confirm 'Instalar ou atualizar a toolchain Rust stable?'
+        rustup update stable
+        rustup default stable
+    elif command -v rustc >/dev/null || command -v cargo >/dev/null; then
+        confirm 'Atualizar os pacotes Rust/Cargo pelo APT?'
+        sudo apt-get update
+        sudo apt-get install --no-remove -y rustc cargo
+    else
+        ensure_packages rustup
+        confirm 'Baixar e instalar Rust/Cargo stable para este usuário?'
+        rustup toolchain install stable --profile minimal
+        rustup default stable
+    fi
+    if ! rust_version_ok; then
+        echo 'Rust/Cargo 1.85 ou superior é necessário. Revise a toolchain ativa.' >&2
+        exit 1
+    fi
+}
+ensure_client_packages() {
+    ensure_packages openssh-client sshfs fuse3 util-linux coreutils
+}
+ensure_server_packages() {
+    ensure_packages openssh-server openssh-client acl util-linux coreutils
+}
+server_material() {
+    for file in config/fornecer-servicos.example.yaml scripts/setup-server.sh         systemd/niteroi-check.service systemd/niteroi-check.timer         systemd/niteroi-catalog.socket systemd/niteroi-catalog@.service; do
+        [ -f "$file" ] || { echo "Arquivo do servidor ausente: $file. Use enviar-servidor a partir do projeto completo." >&2; exit 1; }
+    done
+}
 case "${1-}" in
-    enviar-cliente)
-        [ "$#" -ge 3 ] && [ "$#" -le 4 ] || { echo 'Uso: ./install.sh enviar-cliente IP USUARIO [BINARIO]' >&2; exit 2; }
+    enviar-cliente|enviar-servidor)
+        [ "$#" -ge 3 ] && [ "$#" -le 4 ] || { echo 'Uso: ./install.sh enviar-cliente|enviar-servidor IP USUARIO [BINARIO]' >&2; exit 2; }
         [ "$(id -u)" -ne 0 ] || { echo 'Execute como usuário normal.' >&2; exit 1; }
         case "$2" in ''|-*|*[!a-zA-Z0-9.-]*) echo 'IP ou hostname inválido.' >&2; exit 2;; esac
         case "$3" in ''|-*|*[!a-zA-Z0-9_-]*) echo 'Usuário inválido.' >&2; exit 2;; esac
+        if [ "$1" = enviar-servidor ]; then
+            role=servidor
+            server_material
+        else
+            role=cliente
+        fi
+        ensure_packages openssh-client coreutils
         dest="$3@$2"
         remote_arch=$(ssh "$dest" 'dpkg --print-architecture')
         remote_machine=$(ssh "$dest" 'uname -m')
         if [ "$#" -eq 4 ]; then
             binary=$4
         elif [ "$(dpkg --print-architecture)" = "$remote_arch" ] && [ "$(uname -m)" = "$remote_machine" ]; then
-            client_build
+            build_or_check
         else
             case "$remote_arch:$remote_machine" in
                 arm64:aarch64) target=aarch64-unknown-linux-gnu; linker=aarch64-linux-gnu-gcc; linker_var=CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER;;
@@ -40,10 +113,19 @@ case "${1-}" in
                 amd64:x86_64) target=x86_64-unknown-linux-gnu; linker=x86_64-linux-gnu-gcc; linker_var=CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER;;
                 *) echo "Arquitetura de destino não suportada: $remote_arch ($remote_machine). Informe um binário compilado para ela." >&2; exit 1;;
             esac
-            command -v cargo >/dev/null && command -v "$linker" >/dev/null || {
-                echo "Instale Cargo, o alvo Rust $target e o compilador $linker, ou informe um binário pronto." >&2
+            ensure_rust
+            case "$remote_arch" in
+                amd64) ensure_packages gcc-x86-64-linux-gnu;;
+                *) ensure_packages "gcc-${linker%-gcc}";;
+            esac
+            if ! command -v rustup >/dev/null; then
+                echo "A compilação cruzada requer uma toolchain gerenciada pelo rustup; instale-a ou informe um binário pronto." >&2
                 exit 1
-            }
+            fi
+            if ! rustup target list --installed | grep -Fxq "$target"; then
+                confirm "Instalar o alvo Rust $target?"
+                rustup target add "$target"
+            fi
             env "$linker_var=$linker" cargo build --release --target "$target"
             binary="target/$target/release/ssh-bridge-niteroi"
         fi
@@ -53,26 +135,37 @@ case "${1-}" in
         install -m 0755 "$binary" "$stage/ssh-bridge-niteroi"
         install -m 0755 install.sh "$stage/install.sh"
         install -d "$stage/systemd"
-        install -m 0644 systemd/niteroi-folder@.service systemd/niteroi-socket@.service systemd/niteroi-sync.service systemd/niteroi-sync.timer "$stage/systemd/"
+        if [ "$role" = servidor ]; then
+            install -d "$stage/config" "$stage/scripts"
+            install -m 0644 config/fornecer-servicos.example.yaml "$stage/config/"
+            install -m 0755 scripts/setup-server.sh "$stage/scripts/"
+            install -m 0644 systemd/niteroi-check.service systemd/niteroi-check.timer systemd/niteroi-catalog.socket systemd/niteroi-catalog@.service "$stage/systemd/"
+        else
+            install -m 0644 systemd/niteroi-folder@.service systemd/niteroi-socket@.service systemd/niteroi-sync.service systemd/niteroi-sync.timer "$stage/systemd/"
+        fi
         ssh "$dest" 'umask 077; mkdir -p "$HOME/ssh-bridge-niteroi/systemd"'
         scp -p "$stage/ssh-bridge-niteroi" "$stage/install.sh" "$dest:ssh-bridge-niteroi/"
         scp -p "$stage/systemd/"* "$dest:ssh-bridge-niteroi/systemd/"
+        if [ "$role" = servidor ]; then
+            scp -rp "$stage/config" "$stage/scripts" "$dest:ssh-bridge-niteroi/"
+        fi
         ssh "$dest" '"$HOME/ssh-bridge-niteroi/ssh-bridge-niteroi" --version'
-        echo "Material enviado. No Raspberry, execute: cd ~/ssh-bridge-niteroi && ./install.sh cliente"
+        echo "Material enviado. No destino, execute: cd ~/ssh-bridge-niteroi && ./install.sh $role"
         exit 0
         ;;
     cliente|servidor)
         [ "$#" -eq 1 ] || { echo 'Uso: ./install.sh cliente|servidor' >&2; exit 2; }
         [ "$(id -u)" -ne 0 ] || { echo 'Inicie como usuário normal. O instalador solicitará sudo.' >&2; exit 1; }
         if [ "$1" = cliente ]; then
+            ensure_client_packages
             for cmd in ssh ssh-keygen sftp sshfs fusermount3; do
                 command -v "$cmd" >/dev/null || { echo "Dependência ausente: $cmd (instale openssh-client e sshfs)." >&2; exit 1; }
             done
-            client_build
+            build_or_check
         else
-            [ -f Cargo.toml ] || { echo 'A instalação do servidor requer o projeto completo.' >&2; exit 1; }
-            command -v cargo >/dev/null || { echo 'Instale Rust/Cargo primeiro.' >&2; exit 1; }
-            cargo build --release
+            server_material
+            ensure_server_packages
+            build_or_check
         fi
         prompt 'Hostname ou IP do servidor, como será acessado pelo cliente [scb01]:'
         server=${answer:-scb01}
@@ -115,12 +208,13 @@ case "${1-}" in
             exit 1
         fi
         if [ "${1-}" = --client ]; then
-            client_build
+            ensure_client_packages
+            build_or_check
             exec sudo -- ./install.sh --install-client-only
         fi
-        [ -f Cargo.toml ] || { echo 'Use ./install.sh cliente para instalar o pacote recebido.' >&2; exit 1; }
-        command -v cargo >/dev/null || { echo 'Instale Rust/Cargo antes de continuar.' >&2; exit 1; }
-        cargo build --release
+        server_material
+        ensure_server_packages
+        build_or_check
         exec sudo -- ./install.sh --install-only
         ;;
     --install-only|--install-client-only)
@@ -129,7 +223,7 @@ case "${1-}" in
             exit 1
         fi
         ;;
-    *) echo "Uso: ./install.sh cliente|servidor|enviar-cliente IP USUARIO [BINARIO]" >&2; exit 2 ;;
+    *) echo "Uso: ./install.sh cliente|servidor|enviar-cliente|enviar-servidor IP USUARIO [BINARIO]" >&2; exit 2 ;;
 esac
 test -x "$binary"
 if [ "${1-}" = --install-client-only ]; then
@@ -140,13 +234,14 @@ if [ "${1-}" = --install-client-only ]; then
     echo 'Cliente instalado. Execute ssh-bridge-niteroi client init --server SERVIDOR.'
     exit 0
 fi
+server_material
 if [ ! -d /run/systemd/system ]; then
     echo "Esta instalação precisa de systemd em execução." >&2
     exit 1
 fi
 install -d -m 0755 /usr/local/bin
 install -d -m 0700 /etc/ssh-bridge-niteroi
-install -m 0755 target/release/ssh-bridge-niteroi /usr/local/bin/ssh-bridge-niteroi
+install -m 0755 "$binary" /usr/local/bin/ssh-bridge-niteroi
 if [ ! -e /etc/ssh-bridge-niteroi/fornecer-servicos.yaml ]; then
     install -m 0600 config/fornecer-servicos.example.yaml /etc/ssh-bridge-niteroi/fornecer-servicos.yaml
 fi

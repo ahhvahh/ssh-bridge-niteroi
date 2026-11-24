@@ -1,5 +1,11 @@
 # Configuração do servidor e do cliente
 
+O instalador verifica os pacotes Debian necessários e solicita autorização antes
+de atualizar o índice APT ou instalar dependências. Quando é necessário compilar,
+verifica Rust/Cargo (mínimo 1.85); se estiverem ausentes, oferece a instalação
+da toolchain stable pelo rustup. Para um cliente recebido como binário pronto,
+não instala Rust/Cargo. Execute como usuário normal com acesso ao sudo.
+
 ## Instalação assistida por papel
 
 Nos dois computadores, atualize a branch develop e execute o script como usuário normal. O assistente usa SSH na porta 22. Instale Rust/Cargo e build-essential nos dois, openssh-server e util-linux no servidor, e openssh-client e sshfs no cliente.
@@ -15,6 +21,29 @@ O catálogo informa os recursos e seus modos de acesso. Os dados passam por SFTP
 O servidor Linux anuncia, em um socket Unix local, os recursos cadastrados e autorizados para a conta dedicada niteroi. O cliente consulta esse catálogo via OpenSSH; cada consulta lê o YAML atual e examina grupo e acesso efetivo da conta. O catálogo não recebe comandos, não expõe credenciais e não concede permissões. O SSHFS usa SFTP para pastas; OpenSSH encaminha sockets Unix. Nenhuma porta TCP adicional ao SSH é necessária.
 
 ## 1. Instalar no servidor
+
+### Instalar a partir de um binário enviado
+
+No computador com o projeto completo:
+
+```sh
+./install.sh enviar-servidor 192.168.1.103 usr02_srv
+```
+
+O envio inclui o binário, install.sh, o YAML de exemplo, o script de
+configuração e as unidades systemd do servidor. O binário é compilado para
+a arquitetura de destino ou pode ser indicado como quarto argumento.
+No servidor, execute como usuário normal:
+
+```sh
+cd ~/ssh-bridge-niteroi
+./install.sh servidor
+```
+
+O instalador verifica os arquivos recebidos, instala as dependências após
+confirmação e reutiliza o binário. O servidor não precisa de Cargo.
+O YAML instalado anteriormente em /etc é preservado.
+
 
 Instale Rust/Cargo (https://rustup.rs/), git, build-essential, openssh-server, acl e util-linux. No servidor:
 
