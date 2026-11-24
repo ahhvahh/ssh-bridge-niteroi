@@ -119,6 +119,26 @@ Depois de remover recursos no servidor, novas consultas deixam de anunciá-los. 
 
 ### Reconexão e boot do Raspberry Pi
 
+O assistente de instalação do cliente habilita o timer de sincronização de catálogo.
+Para clientes existentes, após atualizar o binário, habilite-o como usuário normal:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now niteroi-sync.timer
+ssh-bridge-niteroi client refresh
+journalctl --user -u niteroi-sync.service -n 50 --no-pager
+```
+
+O timer consulta o catálogo a cada minuto após a última execução. O comando
+`client refresh` solicita a atualização imediata pelo mesmo serviço. A última
+consulta bem-sucedida fica em `~/.config/ssh-bridge-niteroi/catalog-cache.yaml`.
+Novos recursos são anunciados no log; pastas novas exigem associação local e
+ativação da unidade correspondente. Somente unidades habilitadas de pasta e
+socket são reconciliadas: alterações recriam a conexão, recursos removidos
+são parados, recursos disponíveis são iniciados se necessário. Em caso de
+falha na consulta, as conexões existentes são preservadas. O serviço solicita
+as operações ao systemd; consulte o status das unidades para verificar sua conclusão.
+
 Após instalar ou atualizar o cliente e verificar a impressão digital do servidor, execute como yugo. Substitua os exemplos pelos recursos de `client list` e desmonte primeiro uma montagem manual do mesmo caminho.
 
 ```sh
