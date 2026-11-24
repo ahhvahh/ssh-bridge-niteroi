@@ -124,14 +124,14 @@ Troque SERVIDOR pelo hostname resolvível (ou IP) do Debian. O comando cria ~/.c
 sudo ssh-bridge-niteroi server setup --address SERVIDOR --public-key /caminho/chave-cliente.pub
 ```
 
-Esta etapa cria a conta niteroi dedicada, sem shell, e uma política OpenSSH somente por chave. Permite SFTP e encaminhamento local de sockets Unix; desativa encaminhamento TCP, remoto, agente, X11, túnel de rede e terminal. A política é validada com sshd -t e sshd -T antes do reload; um arquivo de configuração existente divergente ou uma chave diferente não são sobrescritos. Uma conta niteroi não criada pelo instalador é recusada para evitar tomar controle de uma conta existente. Nesse caso, o administrador deve revisar e provisionar a conta e a política separadamente.
+Esta etapa cria a conta niteroi dedicada, sem shell, e uma política OpenSSH somente por chave. Permite SFTP e encaminhamento local de sockets Unix. Para compatibilidade com OpenSSH, habilita encaminhamento local na política SSH e instala uma regra nftables dedicada ao UID niteroi que impede novas conexões TCP. O encaminhamento remoto, agente, X11, túnel de rede e terminal continuam desabilitados. O serviço niteroi-guard.service é exigido pelo SSH na inicialização. Se o firewall for recarregado externamente, preserve a tabela inet niteroi_guard e confira sua presença antes de aceitar conexões; use systemctl reload niteroi-guard.service para reaplicá-la. A política é validada com sshd -t e sshd -T antes do reload; uma configuração existente divergente ou uma chave diferente não são sobrescritas; a política original gerenciada e a variante com DEBUG1 e diretivas duplicadas são migradas. Uma conta niteroi não criada pelo instalador é recusada para evitar tomar controle de uma conta existente. Nesse caso, o administrador deve revisar e provisionar a conta e a política separadamente.
 
 A chave aceita é única nesta primeira implementação. Não substitua nem reutilize a chave de administração. O comando configura o usuário de acesso no YAML e habilita o catálogo para iniciar no boot. Ele não associa grupos de recursos automaticamente.
 
 ## 4. Cadastrar recursos
 
 ```sh
-sudo ssh-bridge-niteroi folder add /data/project/exemplo --id projetos --permissao rw --grupo niteroi-rw
+sudo ssh-bridge-niteroi folder add /mnt/srv-shared --id projetos --permissao rw --grupo niteroi-rw
 sudo ssh-bridge-niteroi folder add /data/project/referencias --id referencias --permissao ro --grupo niteroi-ro
 sudo ssh-bridge-niteroi socket add exemplo /home/usuario/.local/share/niteroi/sockets/exemplo.sock /run/exemplo.sock --grupo niteroi-sockets --habilitado
 sudo ssh-bridge-niteroi guest add convidado cliente.local usuario
@@ -141,7 +141,7 @@ Substitua os exemplos pelos caminhos reais. Se já cadastrou os recursos, edite 
 
 O administrador deve associar a conta niteroi apenas aos grupos autorizados, garantir o grupo proprietário e as permissões dos recursos e o direito de travessia nos diretórios pais. Use ACLs para os dados existentes e sua herança quando necessário. Para sockets, configure a aplicação proprietária para criá-los com o grupo e modo corretos a cada reinicialização. Não altere permissões recursivamente sem revisar os dados.
 
-O catálogo só inclui pastas abaixo de /data/ e sockets Unix habilitados que passam a conferência de grupo, tipo e acesso efetivo da entrada. Caminhos simples, sem espaços, são suportados nesta versão. Uma pasta ro exige ausência de gravação na entrada; o administrador também precisa verificar os arquivos e subpastas. O catálogo não é uma sandbox de SFTP: outras entradas legíveis pela conta no Linux podem continuar acessíveis diretamente. Para isolamento estrito, use uma conta e ambiente SFTP isolados e restrinja as permissões dos recursos.
+O catálogo inclui pastas em qualquer caminho absoluto válido (por exemplo /mnt/srv-shared, /srv ou /home) e sockets Unix habilitados que passam a conferência de grupo, tipo e acesso efetivo da entrada. Caminhos simples, sem espaços, são suportados nesta versão. Uma pasta ro exige ausência de gravação na entrada; o administrador também precisa verificar os arquivos e subpastas. O catálogo não é uma sandbox de SFTP: outras entradas legíveis pela conta no Linux podem continuar acessíveis diretamente. Para isolamento estrito, use uma conta e ambiente SFTP isolados e restrinja as permissões dos recursos.
 
 ```sh
 sudo ssh-bridge-niteroi validate
@@ -223,3 +223,12 @@ systemctl status ssh niteroi-catalog.socket
 ```
 
 Se o catálogo vier vazio, confira os grupos, os modos de acesso e o tipo do recurso. Se a conexão SSH falhar, revise hostname, chave de host, chave pública autorizada e a política efetiva de sshd. A chave privada permanece no cliente.
+
+### Verificar a proteção no servidor
+
+```sh
+sudo systemctl status niteroi-guard.service --no-pager
+sudo nft list table inet niteroi_guard
+```
+
+A regra é aplicada antes da política SSH. A dependência do SSH evita inicialização sem proteção caso o serviço falhe. Reaplique e confira a tabela após qualquer alteração externa no firewall. Não use `nft flush ruleset` com esta configuração ativa.
