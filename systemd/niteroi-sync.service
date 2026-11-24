@@ -1,0 +1,7 @@
+[Unit]
+Description=Sincronizar catálogo e conexões Niterói
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ssh-bridge-niteroi client sync
+TimeoutStartSec=60s
