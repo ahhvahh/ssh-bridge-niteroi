@@ -1,0 +1,11 @@
+[Unit]
+Description=Montagem SSHFS Niterói %i
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/local/bin/ssh-bridge-niteroi client mount --foreground %i
+Restart=always
+RestartSec=10s
+
+[Install]
+WantedBy=default.target
