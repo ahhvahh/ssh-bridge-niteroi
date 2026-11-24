@@ -36,6 +36,42 @@ sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 
 ## 2. Instalar no cliente
 
+### Enviar o cliente já compilado por SSH
+
+No computador de compilação, dentro do repositório, execute como usuário normal:
+
+```sh
+./install.sh enviar-cliente 192.168.1.50 yugo
+```
+
+Use o IP real do Raspberry. O instalador consulta a arquitetura do Debian remoto,
+compila para ela e envia o executável, o instalador e as unidades systemd de
+cliente para `~/ssh-bridge-niteroi/`. Para compilação cruzada, instale previamente
+o alvo Rust e o compilador C correspondente. Por exemplo, para Debian ARM64
+em um computador Debian AMD64:
+
+```sh
+sudo apt install gcc-aarch64-linux-gnu
+rustup target add aarch64-unknown-linux-gnu
+```
+
+Também é possível informar um executável já compilado:
+
+```sh
+./install.sh enviar-cliente 192.168.1.50 yugo /caminho/ssh-bridge-niteroi
+```
+
+O envio testa a execução de `--version` no destino. No Raspberry, instale
+as dependências openssh-client e sshfs e execute como o usuário de destino:
+
+```sh
+cd ~/ssh-bridge-niteroi
+./install.sh cliente
+```
+
+Nesse modo, o instalador reutiliza o binário recebido e dispensa Cargo no
+Raspberry. A instalação permanece assistida e solicita sudo localmente.
+
 Instale Rust/Cargo e as dependências no Raspberry Pi (compile para a arquitetura do próprio sistema):
 
 ```sh
