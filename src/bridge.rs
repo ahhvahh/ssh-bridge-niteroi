@@ -28,6 +28,10 @@ pub(super) enum ClientAction {
     Init { #[arg(long)] server: String, #[arg(long, default_value_t = 22)] port: u16 },
     /// Discover the resources currently available on the server.
     List,
+    /// Request immediate synchronization using the user service.
+    Refresh,
+    /// Reconcile the catalog and enabled local resources (used by systemd).
+    Sync,
     /// Associate a catalog ID with a local absolute path.
     Bind { id: String, local: PathBuf },
     /// Mount a registered directory using SSHFS (ID or legacy path).
@@ -55,7 +59,7 @@ struct Catalog {
     sockets: Vec<Socket>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct Folder {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -68,7 +72,7 @@ impl Folder {
     fn key(&self) -> &str { self.id.as_deref().unwrap_or(&self.path) }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct Socket { name: String, path: String }
 
@@ -225,6 +229,77 @@ impl Client {
         Ok(private_dir(&self.home, Path::new(".config/ssh-bridge-niteroi/mounts"))?.join(id))
     }
 
+    fn sync(&self, catalog: &Catalog) -> Result<(), String> {
+        let dir = private_dir(&self.home, Path::new(".config/ssh-bridge-niteroi"))?;
+        let snapshot = dir.join("catalog-cache.yaml");
+        let previous: Option<Catalog> = match fs::read_to_string(&snapshot) {
+            Ok(data) => Some(yaml_serde::from_str(&data).map_err(error)?),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(error(e)),
+        };
+        for folder in &catalog.folders {
+            if previous.as_ref().is_none_or(|p| !p.folders.contains(folder)) {
+                println!("Pasta anunciada ou alterada: {}", folder.key());
+            }
+        }
+        for socket in &catalog.sockets {
+            if previous.as_ref().is_none_or(|p| !p.sockets.contains(socket)) {
+                println!("Socket anunciado ou alterado: {}", socket.name);
+            }
+        }
+        if let Some(old) = &previous {
+            for folder in &old.folders {
+                if !catalog.folders.iter().any(|f| f.key() == folder.key()) {
+                    println!("Pasta removida: {}", folder.key());
+                }
+            }
+            for socket in &old.sockets {
+                if !catalog.sockets.iter().any(|s| s.name == socket.name) {
+                    println!("Socket removido: {}", socket.name);
+                }
+            }
+        }
+
+        let output = Command::new("/usr/bin/systemctl")
+            .args(["--user", "list-unit-files", "--state=enabled,enabled-runtime",
+                "--no-legend", "--no-pager", "niteroi-folder@*.service", "niteroi-socket@*.service"])
+            .output().map_err(error)?;
+        if !output.status.success() {
+            return Err(format!("Não foi possível consultar unidades: {}", String::from_utf8_lossy(&output.stderr)));
+        }
+        let units = String::from_utf8(output.stdout).map_err(error)?;
+        let mut errors = Vec::new();
+        for line in units.lines() {
+            let Some(unit) = line.split_whitespace().next() else { continue; };
+            let Some(instance) = unit.strip_suffix(".service") else { continue; };
+            let (available, changed) = if let Some(id) = instance.strip_prefix("niteroi-folder@") {
+                if !safe_name(id) { continue; }
+                let current = catalog.folders.iter().find(|f| f.id.as_deref() == Some(id));
+                let old = previous.as_ref().and_then(|p| p.folders.iter().find(|f| f.id.as_deref() == Some(id)));
+                (current.is_some() && self.binding_path(id)?.exists(), current != old)
+            } else if let Some(id) = instance.strip_prefix("niteroi-socket@") {
+                if !safe_name(id) { continue; }
+                let current = catalog.sockets.iter().find(|s| s.name == id);
+                let old = previous.as_ref().and_then(|p| p.sockets.iter().find(|s| s.name == id));
+                (current.is_some(), current != old)
+            } else { continue; };
+            let action = if !available { "stop" } else if changed { "restart" } else { "start" };
+            if let Err(e) = successful(Command::new("/usr/bin/systemctl")
+                .args(["--user", "--no-block", action, unit])) {
+                errors.push(format!("{unit}: {e}"));
+            } else if changed || !available {
+                println!("{unit}: {action}");
+            }
+        }
+        if !errors.is_empty() { return Err(errors.join("\n")); }
+        let data = yaml_serde::to_string(catalog).map_err(error)?;
+        let temporary = dir.join(format!("catalog-cache-{}.tmp", std::process::id()));
+        write_new(&temporary, data.as_bytes())?;
+        fs::rename(&temporary, &snapshot).map_err(error)?;
+        println!("Catálogo atualizado: {} pasta(s), {} socket(s).", catalog.folders.len(), catalog.sockets.len());
+        Ok(())
+    }
+
     fn checked_destination(local: &Path) -> Result<PathBuf, String> {
         let relative = local.strip_prefix("/").map_err(|_| "Destino precisa ser absoluto")?;
         if relative.as_os_str().is_empty() || relative.components().any(|c| !matches!(c, Component::Normal(_))) {
@@ -302,6 +377,8 @@ impl Drop for Guard {
 pub(super) fn client(action: ClientAction) -> Result<(), String> {
     let action = match action {
         ClientAction::Init { server, port } => return client_init(server, port),
+        ClientAction::Refresh => return successful(Command::new("/usr/bin/systemctl")
+            .args(["--user", "start", "niteroi-sync.service"])),
         other => other,
     };
     let c = Client::load()?;
@@ -311,6 +388,7 @@ pub(super) fn client(action: ClientAction) -> Result<(), String> {
     }
     let catalog = c.catalog()?;
     match action {
+        ClientAction::Sync => c.sync(&catalog),
         ClientAction::List => {
             for f in catalog.folders { println!("folder {} {} {}", if f.read_only { "ro" } else { "rw" }, f.key(), f.path); }
             for s in catalog.sockets { println!("socket {}", s.name); }
