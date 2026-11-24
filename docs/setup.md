@@ -36,6 +36,42 @@ sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 
 ## 2. Instalar no cliente
 
+### Enviar o cliente já compilado por SSH
+
+No computador de compilação, dentro do repositório, execute como usuário normal:
+
+```sh
+./install.sh enviar-cliente 192.168.1.50 yugo
+```
+
+Use o IP real do Raspberry. O instalador consulta a arquitetura do Debian remoto,
+compila para ela e envia o executável, o instalador e as unidades systemd de
+cliente para `~/ssh-bridge-niteroi/`. Para compilação cruzada, instale previamente
+o alvo Rust e o compilador C correspondente. Por exemplo, para Debian ARM64
+em um computador Debian AMD64:
+
+```sh
+sudo apt install gcc-aarch64-linux-gnu
+rustup target add aarch64-unknown-linux-gnu
+```
+
+Também é possível informar um executável já compilado:
+
+```sh
+./install.sh enviar-cliente 192.168.1.50 yugo /caminho/ssh-bridge-niteroi
+```
+
+O envio testa a execução de `--version` no destino. No Raspberry, instale
+as dependências openssh-client e sshfs e execute como o usuário de destino:
+
+```sh
+cd ~/ssh-bridge-niteroi
+./install.sh cliente
+```
+
+Nesse modo, o instalador reutiliza o binário recebido e dispensa Cargo no
+Raspberry. A instalação permanece assistida e solicita sudo localmente.
+
 Instale Rust/Cargo e as dependências no Raspberry Pi (compile para a arquitetura do próprio sistema):
 
 ```sh
@@ -118,6 +154,26 @@ Depois de remover recursos no servidor, novas consultas deixam de anunciá-los. 
 ## 6. Logs e diagnóstico
 
 ### Reconexão e boot do Raspberry Pi
+
+O assistente de instalação do cliente habilita o timer de sincronização de catálogo.
+Para clientes existentes, após atualizar o binário, habilite-o como usuário normal:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now niteroi-sync.timer
+ssh-bridge-niteroi client refresh
+journalctl --user -u niteroi-sync.service -n 50 --no-pager
+```
+
+O timer consulta o catálogo a cada minuto após a última execução. O comando
+`client refresh` solicita a atualização imediata pelo mesmo serviço. A última
+consulta bem-sucedida fica em `~/.config/ssh-bridge-niteroi/catalog-cache.yaml`.
+Novos recursos são anunciados no log; pastas novas exigem associação local e
+ativação da unidade correspondente. Somente unidades habilitadas de pasta e
+socket são reconciliadas: alterações recriam a conexão, recursos removidos
+são parados, recursos disponíveis são iniciados se necessário. Em caso de
+falha na consulta, as conexões existentes são preservadas. O serviço solicita
+as operações ao systemd; consulte o status das unidades para verificar sua conclusão.
 
 Após instalar ou atualizar o cliente e verificar a impressão digital do servidor, execute como yugo. Substitua os exemplos pelos recursos de `client list` e desmonte primeiro uma montagem manual do mesmo caminho.
 
